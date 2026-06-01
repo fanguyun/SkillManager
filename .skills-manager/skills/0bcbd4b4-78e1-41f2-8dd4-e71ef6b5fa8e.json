@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0bcbd4b4-78e1-41f2-8dd4-e71ef6b5fa8e",
+  "path": "threejs-shaders",
+  "path_key": "threejs-shaders",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

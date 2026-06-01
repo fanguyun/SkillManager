@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b1b3142c-1319-4f59-b0ce-9c9abafb7290",
+  "path": "threejs-interaction",
+  "path_key": "threejs-interaction",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

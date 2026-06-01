@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "776baaaa-dffa-4635-a4d1-6c1c5f3afa9d",
+  "path": "bolder",
+  "path_key": "bolder",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e8f85fca-e369-44f5-ad05-97f4a7ae7f6d",
+  "path": "code-refactoring",
+  "path_key": "code-refactoring",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

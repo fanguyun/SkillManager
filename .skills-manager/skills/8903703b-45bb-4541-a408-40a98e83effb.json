@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8903703b-45bb-4541-a408-40a98e83effb",
+  "path": "openspec-explore",
+  "path_key": "openspec-explore",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "9c4ebf75-8381-48a1-8848-451c8b1e239c",
+  "path": "harden",
+  "path_key": "harden",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

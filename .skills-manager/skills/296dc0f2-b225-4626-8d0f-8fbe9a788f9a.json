@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "296dc0f2-b225-4626-8d0f-8fbe9a788f9a",
+  "path": "threejs-textures",
+  "path_key": "threejs-textures",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

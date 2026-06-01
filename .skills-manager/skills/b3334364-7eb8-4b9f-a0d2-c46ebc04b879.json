@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b3334364-7eb8-4b9f-a0d2-c46ebc04b879",
+  "path": "tmux",
+  "path_key": "tmux",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

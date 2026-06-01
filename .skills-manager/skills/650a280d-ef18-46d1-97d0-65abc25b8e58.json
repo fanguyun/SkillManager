@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "650a280d-ef18-46d1-97d0-65abc25b8e58",
+  "path": "polish",
+  "path_key": "polish",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

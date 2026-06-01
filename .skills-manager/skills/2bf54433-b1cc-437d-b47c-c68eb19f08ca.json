@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "2bf54433-b1cc-437d-b47c-c68eb19f08ca",
+  "path": "delight",
+  "path_key": "delight",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

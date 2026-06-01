@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b0f4eb1e-4b18-4c5b-b40e-baab3c2583f0",
+  "path": "quieter",
+  "path_key": "quieter",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

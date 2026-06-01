@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "3df6c74c-597e-4b0b-b481-c0c567ff4c4b",
+  "path": "openspec-ff-change",
+  "path_key": "openspec-ff-change",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

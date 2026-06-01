@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f133193a-18a8-4e9d-b32e-bf1eaa359379",
+  "path": "threejs-loaders",
+  "path_key": "threejs-loaders",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

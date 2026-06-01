@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "3797b5dd-53ae-4501-8aa5-3f835b9cd281",
+  "path": "changelog-maintenance",
+  "path_key": "changelog-maintenance",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

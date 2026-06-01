@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8e1a3151-e71e-474f-ab87-2df24f3568ff",
+  "path": "job-hunt",
+  "path_key": "job-hunt",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "jpcwhj/job-hunt/job-hunt",
+    "subpath": "skills/job-hunt",
+    "branch": null
+  }
+}

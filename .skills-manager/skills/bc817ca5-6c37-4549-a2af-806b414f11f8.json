@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "bc817ca5-6c37-4549-a2af-806b414f11f8",
+  "path": "develop-web-game",
+  "path_key": "develop-web-game",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

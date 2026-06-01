@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7ebf7091-0949-4e3c-aa5f-6a64871f76e9",
+  "path": "api-design-principles",
+  "path_key": "api-design-principles",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

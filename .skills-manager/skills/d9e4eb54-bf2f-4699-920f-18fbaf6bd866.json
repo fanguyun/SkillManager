@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d9e4eb54-bf2f-4699-920f-18fbaf6bd866",
+  "path": "threejs-fundamentals",
+  "path_key": "threejs-fundamentals",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

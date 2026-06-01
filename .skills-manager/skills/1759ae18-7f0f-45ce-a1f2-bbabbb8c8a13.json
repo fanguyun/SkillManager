@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "1759ae18-7f0f-45ce-a1f2-bbabbb8c8a13",
+  "path": "gws-docs",
+  "path_key": "gws-docs",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

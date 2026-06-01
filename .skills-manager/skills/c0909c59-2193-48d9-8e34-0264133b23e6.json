@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c0909c59-2193-48d9-8e34-0264133b23e6",
+  "path": "learning-mentor",
+  "path_key": "learning-mentor",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
