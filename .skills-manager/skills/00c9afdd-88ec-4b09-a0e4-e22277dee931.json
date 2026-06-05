@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "00c9afdd-88ec-4b09-a0e4-e22277dee931",
+  "path": "kubernetes-specialist",
+  "path_key": "kubernetes-specialist",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

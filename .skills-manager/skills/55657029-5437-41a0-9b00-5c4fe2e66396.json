@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "55657029-5437-41a0-9b00-5c4fe2e66396",
+  "path": "flutter-expert",
+  "path_key": "flutter-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

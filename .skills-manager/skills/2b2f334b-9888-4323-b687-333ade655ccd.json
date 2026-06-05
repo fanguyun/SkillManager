@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "2b2f334b-9888-4323-b687-333ade655ccd",
+  "path": "test-master",
+  "path_key": "test-master",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

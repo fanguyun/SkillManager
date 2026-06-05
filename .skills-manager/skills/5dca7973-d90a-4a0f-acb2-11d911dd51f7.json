@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "5dca7973-d90a-4a0f-acb2-11d911dd51f7",
+  "path": "php-pro",
+  "path_key": "php-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

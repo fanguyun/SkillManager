@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "6438cae6-a922-424c-ba38-e7497ec3fbe0",
+  "path": "ml-pipeline",
+  "path_key": "ml-pipeline",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

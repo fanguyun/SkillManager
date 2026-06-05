@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "75091746-5aff-4413-8a60-b5c6f724cb1d",
+  "path": "cpp-pro",
+  "path_key": "cpp-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

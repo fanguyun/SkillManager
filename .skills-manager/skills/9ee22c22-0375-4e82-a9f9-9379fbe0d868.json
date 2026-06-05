@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "9ee22c22-0375-4e82-a9f9-9379fbe0d868",
+  "path": "rag-architect",
+  "path_key": "rag-architect",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

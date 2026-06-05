@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "91ee997c-cbb7-4edf-bada-5a75cb766272",
+  "path": "chaos-engineer",
+  "path_key": "chaos-engineer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

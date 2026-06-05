@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b024bc7b-0a16-4acb-b286-410bbad6612e",
+  "path": "spec-miner",
+  "path_key": "spec-miner",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

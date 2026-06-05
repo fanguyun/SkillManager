@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d7d8a653-8302-48ee-8ecc-ba70a1834e2c",
+  "path": "postgres-pro",
+  "path_key": "postgres-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

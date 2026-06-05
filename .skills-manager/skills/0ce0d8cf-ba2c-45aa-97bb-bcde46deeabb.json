@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0ce0d8cf-ba2c-45aa-97bb-bcde46deeabb",
+  "path": "kotlin-specialist",
+  "path_key": "kotlin-specialist",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "470ddbe5-f125-4759-ad1b-9f42827fc48a",
+  "path": "angular-architect",
+  "path_key": "angular-architect",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

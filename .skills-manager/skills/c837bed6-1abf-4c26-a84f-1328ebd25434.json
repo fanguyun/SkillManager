@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c837bed6-1abf-4c26-a84f-1328ebd25434",
+  "path": "wordpress-pro",
+  "path_key": "wordpress-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "37388c38-5d92-4ccc-ae22-dc85de0e57c7",
+  "path": "golang-pro",
+  "path_key": "golang-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

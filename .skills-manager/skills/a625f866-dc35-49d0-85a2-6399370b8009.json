@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a625f866-dc35-49d0-85a2-6399370b8009",
+  "path": "sql-pro",
+  "path_key": "sql-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

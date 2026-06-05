@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "6253e602-e4cb-4967-b0a9-9f6f67c13458",
+  "path": "sre-engineer",
+  "path_key": "sre-engineer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

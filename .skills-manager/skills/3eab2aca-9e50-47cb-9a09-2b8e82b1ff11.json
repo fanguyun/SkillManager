@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "3eab2aca-9e50-47cb-9a09-2b8e82b1ff11",
+  "path": "game-developer",
+  "path_key": "game-developer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

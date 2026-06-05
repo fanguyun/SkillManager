@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7ca0ecec-108a-427d-8b91-4274dcdef497",
+  "path": "csharp-developer",
+  "path_key": "csharp-developer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

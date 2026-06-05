@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0fb84acd-0cee-4836-b4a2-b079c8bd6ac1",
+  "path": "react-expert",
+  "path_key": "react-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

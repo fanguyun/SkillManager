@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8ad1dad3-aa97-428c-ba40-db9187085b94",
+  "path": "javascript-pro",
+  "path_key": "javascript-pro",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

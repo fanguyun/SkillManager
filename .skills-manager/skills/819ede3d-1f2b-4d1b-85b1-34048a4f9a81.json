@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "819ede3d-1f2b-4d1b-85b1-34048a4f9a81",
+  "path": "terraform-engineer",
+  "path_key": "terraform-engineer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "aeee7a8b-9a9b-4a59-9cb2-d88de394321b",
+  "path": "security-reviewer",
+  "path_key": "security-reviewer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

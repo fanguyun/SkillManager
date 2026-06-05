@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "72a5ac93-4a57-47fe-9d65-8ab8776d419e",
+  "path": "database-optimizer",
+  "path_key": "database-optimizer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

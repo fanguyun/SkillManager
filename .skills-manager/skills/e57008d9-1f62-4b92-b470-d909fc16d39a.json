@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e57008d9-1f62-4b92-b470-d909fc16d39a",
+  "path": "fine-tuning-expert",
+  "path_key": "fine-tuning-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

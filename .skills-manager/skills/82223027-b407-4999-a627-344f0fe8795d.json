@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "82223027-b407-4999-a627-344f0fe8795d",
+  "path": "spark-engineer",
+  "path_key": "spark-engineer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d5436b3c-a413-47c1-9837-e92bc6fd3a38",
+  "path": "rails-expert",
+  "path_key": "rails-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

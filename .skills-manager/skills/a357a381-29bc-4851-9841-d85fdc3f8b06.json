@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a357a381-29bc-4851-9841-d85fdc3f8b06",
+  "path": "legacy-modernizer",
+  "path_key": "legacy-modernizer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

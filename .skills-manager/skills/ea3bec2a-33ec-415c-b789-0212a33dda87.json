@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ea3bec2a-33ec-415c-b789-0212a33dda87",
+  "path": "vue-expert-js",
+  "path_key": "vue-expert-js",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "dc2c13cd-e03e-4cb8-8458-a542fa0fad34",
+  "path": "cloud-architect",
+  "path_key": "cloud-architect",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

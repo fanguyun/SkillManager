@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8f6caed5-6c39-4b70-b91d-4182aa1111d1",
+  "path": "react-native-expert",
+  "path_key": "react-native-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

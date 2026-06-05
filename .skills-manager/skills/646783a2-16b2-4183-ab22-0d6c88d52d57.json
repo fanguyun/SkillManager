@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "646783a2-16b2-4183-ab22-0d6c88d52d57",
+  "path": "monitoring-expert",
+  "path_key": "monitoring-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

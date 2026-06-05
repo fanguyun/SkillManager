@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a5fe9c97-40ee-4b3b-b74a-752a84fad4d4",
+  "path": "code-documenter",
+  "path_key": "code-documenter",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

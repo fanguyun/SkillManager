@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d181a1c8-84f3-4839-9a27-7ebb4f52abf7",
+  "path": "cli-developer",
+  "path_key": "cli-developer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ddc85e85-25fd-4eee-8706-07c1a72cde68",
+  "path": "feature-forge",
+  "path_key": "feature-forge",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b2b14802-1019-4614-9718-00406fed0de5",
+  "path": "devops-engineer",
+  "path_key": "devops-engineer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

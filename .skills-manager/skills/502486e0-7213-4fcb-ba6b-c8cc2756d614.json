@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "502486e0-7213-4fcb-ba6b-c8cc2756d614",
+  "path": "secure-code-guardian",
+  "path_key": "secure-code-guardian",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

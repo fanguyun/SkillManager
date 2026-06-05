@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "43134a3c-b374-4b72-b3e8-6e1bb8a7aba6",
+  "path": "django-expert",
+  "path_key": "django-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

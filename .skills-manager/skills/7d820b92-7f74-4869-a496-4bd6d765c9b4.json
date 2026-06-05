@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7d820b92-7f74-4869-a496-4bd6d765c9b4",
+  "path": "microservices-architect",
+  "path_key": "microservices-architect",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

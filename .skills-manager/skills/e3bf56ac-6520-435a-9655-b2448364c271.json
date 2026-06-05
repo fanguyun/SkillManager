@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e3bf56ac-6520-435a-9655-b2448364c271",
+  "path": "shopify-expert",
+  "path_key": "shopify-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

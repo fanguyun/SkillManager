@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7b3fb0c3-ea1c-4ee0-9ecc-9e33e1d61ed6",
+  "path": "fastapi-expert",
+  "path_key": "fastapi-expert",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
