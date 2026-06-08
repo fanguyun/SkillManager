@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "5b4f7f25-22a3-4a72-ab31-ad33848720a4",
+  "path": "gsap-react",
+  "path_key": "gsap-react",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
