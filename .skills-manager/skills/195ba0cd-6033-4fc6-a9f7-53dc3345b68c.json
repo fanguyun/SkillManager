@@ -4,7 +4,9 @@
   "path": "books",
   "path_key": "books",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book"
+  ],
   "source": {
     "type": "local",
     "ref": null,
