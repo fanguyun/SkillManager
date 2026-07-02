@@ -1,0 +1,5 @@
+interface:
+  display_name: "Excel i18n 生成"
+  short_description: "从 Excel 翻译表生成多语言 JSON 文件"
+  default_prompt: "使用 $gen-i18n 将包含 Key 和语言列的 Excel 翻译表转换为多语言 JSON 文件，并检查输出目录、排除列和空值处理是否符合预期。"
+
