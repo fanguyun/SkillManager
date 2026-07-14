@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "9a498e33-ef11-4b53-bd02-6c8be9652fe4",
+  "path": "weread-skills",
+  "path_key": "weread-skills",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
