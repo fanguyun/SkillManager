@@ -1,7 +1,0 @@
-interface:
-  display_name: "长期复利定投系统"
-  short_description: "结合家庭资产负债和现金流的每月定投资产配置"
-  default_prompt: "使用 $dca-strategy 完成对应任务。"
-
-policy:
-  allow_implicit_invocation: true
