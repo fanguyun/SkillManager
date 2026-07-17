@@ -1,0 +1,7 @@
+interface:
+  display_name: "技能显示名"
+  short_description: "一句中文短描述，便于在技能列表中识别"
+  default_prompt: "使用 $your-skill-name 完成对应任务。"
+
+policy:
+  allow_implicit_invocation: true

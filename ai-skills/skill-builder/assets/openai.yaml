@@ -1,0 +1,18 @@
+interface:
+  display_name: "Skill Name"           # 用户可见名称，可与 SKILL.md 的 name 不同
+  short_description: "One-line description shown in Codex UI"
+  # icon_small: "./assets/icon-small.svg"   # 16x16 或 24x24 SVG，可选
+  # icon_large: "./assets/icon-large.png"   # 256x256 PNG，可选
+  # brand_color: "#3B82F6"                  # 十六进制颜色，可选
+  # default_prompt: ""                      # 调用时的默认前置 prompt，可选
+
+policy:
+  allow_implicit_invocation: true      # false = 只允许 $skill-name 显式调用
+
+# dependencies:
+#   tools:
+#     - type: "mcp"
+#       value: "toolName"
+#       description: "What this tool does"
+#       transport: "streamable_http"
+#       url: "https://example.com/mcp"

@@ -1,0 +1,17 @@
+{
+  "name": "ai-skills",
+  "version": "1.0.0",
+  "description": "一个用于集中维护可复用 AI skills 的仓库，适用于 Codex、Claude Code 以及其他基于本地 skill 目录的 agent 工作流。",
+  "main": "index.js",
+  "scripts": {
+    "new": "bash scripts/create-skill.sh",
+    "install": "bash scripts/install-skill.sh",
+    "uninstall": "bash scripts/uninstall-skill.sh",
+    "list": "bash scripts/list-skills.sh",
+    "pack": "python3 ~/.claude/skills/skill-creator/scripts/package_skill.py",
+    "validate": "python3 ~/.claude/skills/skill-creator/scripts/quick_validate.py"
+  },
+  "author": "",
+  "license": "ISC",
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+}
