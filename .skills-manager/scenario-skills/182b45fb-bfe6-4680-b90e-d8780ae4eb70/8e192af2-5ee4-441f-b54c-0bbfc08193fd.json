@@ -13,6 +13,7 @@
     "command_code": true,
     "continue": true,
     "crush": true,
+    "cursor": true,
     "droid": true,
     "gemini_cli": true,
     "github_copilot": true,
@@ -31,6 +32,7 @@
     "trae": true,
     "warp": true,
     "windsurf": true,
+    "workbuddy": true,
     "zencoder": true
   }
 }
