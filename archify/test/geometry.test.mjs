@@ -631,16 +631,33 @@ test('applyTemplate preserves dollar sequences in titles', () => {
 <p class="subtitle">[Subtitle description]</p>
 <!-- ARCHIFY:GUIDED_VIEWS_DATA -->
       <!-- ARCHIFY:SVG_SLOT_START --><svg></svg>      <!-- ARCHIFY:SVG_SLOT_END -->
-    <!-- ARCHIFY:CARDS_SLOT_START --><div></div>    <!-- ARCHIFY:CARDS_SLOT_END -->
-[Project Name] &bull; [Additional metadata]`;
+    <!-- ARCHIFY:CARDS_SLOT_START --><div></div>    <!-- ARCHIFY:CARDS_SLOT_END -->`;
   const html = applyTemplate(template, {
     title: 'Plan $$50 tier',
     subtitle: 'test',
-    footer: 'f',
     svg: '<svg/>',
     cards: '',
   });
   assert.match(html, /Plan \$\$50 tier/);
+  assert.match(html, /<p class="subtitle">test<\/p>/);
+});
+
+test('applyTemplate omits the subtitle row when no subtitle is authored', () => {
+  const template = `<html lang="en" data-theme="dark" data-preset="[VISUAL PRESET]">
+<title>[PROJECT NAME] Architecture Diagram</title>
+<h1>[PROJECT NAME] Architecture</h1>
+<p class="subtitle">[Subtitle description]</p>
+<!-- ARCHIFY:GUIDED_VIEWS_DATA -->
+      <!-- ARCHIFY:SVG_SLOT_START --><svg></svg>      <!-- ARCHIFY:SVG_SLOT_END -->
+    <!-- ARCHIFY:CARDS_SLOT_START --><div></div>    <!-- ARCHIFY:CARDS_SLOT_END -->`;
+  const html = applyTemplate(template, {
+    title: 'Focused title',
+    subtitle: '   ',
+    svg: '<svg/>',
+    cards: '',
+  });
+  assert.doesNotMatch(html, /class="subtitle"/);
+  assert.doesNotMatch(html, /Subtitle description/);
 });
 
 test('applyTemplate requires the new evidence slot only when evidence is present', () => {
@@ -650,13 +667,12 @@ test('applyTemplate requires the new evidence slot only when evidence is present
 <p class="subtitle">[Subtitle description]</p>
 <!-- ARCHIFY:GUIDED_VIEWS_DATA -->
       <!-- ARCHIFY:SVG_SLOT_START --><svg></svg>      <!-- ARCHIFY:SVG_SLOT_END -->
-    <!-- ARCHIFY:CARDS_SLOT_START --><div></div>    <!-- ARCHIFY:CARDS_SLOT_END -->
-[Project Name] &bull; [Additional metadata]`;
+    <!-- ARCHIFY:CARDS_SLOT_START --><div></div>    <!-- ARCHIFY:CARDS_SLOT_END -->`;
   assert.doesNotThrow(() => applyTemplate(legacyTemplate, {
-    title: 'Legacy', subtitle: '', footer: '', svg: '<svg/>', cards: '',
+    title: 'Legacy', subtitle: '', svg: '<svg/>', cards: '',
   }));
   assert.throws(() => applyTemplate(legacyTemplate, {
-    title: 'Evidence', subtitle: '', footer: '', svg: '<svg/>', cards: '',
+    title: 'Evidence', subtitle: '', svg: '<svg/>', cards: '',
     sourceEvidence: { verified: true },
   }), /repository evidence requires placeholder/);
 });

@@ -66,6 +66,9 @@ const CASES = [
     (d) => { d.nodes[0].label = 'An Extremely Long Node Label That Overflows'; }, ['wider than node', 'shorten the label']],
   ['workflow: node sublabel wider than its legible minimum', 'workflow',
     (d) => { d.nodes[0].sublabel = 'This supporting sentence is much too long for one workflow node'; }, ['Sublabel', 'legible', 'increase node.width']],
+  ['workflow: node tag wider than its legible minimum', 'workflow',
+    (d) => { d.nodes[0].tag = 'This tag is far too long to sit inside one workflow node box'; },
+    ['Tag', 'legible', 'increase node.width']],
   ['workflow: viewBox width below schema min', 'workflow',
     (d) => { d.meta.viewBox = [699, 900]; }, ['700']],
   ['workflow: nodes too close in a lane', 'workflow',
@@ -86,6 +89,9 @@ const CASES = [
     (d) => { d.messages[0].y = 9000; }, ['outside the readable timeline', 'keep y between']],
   ['sequence: segment to <= from', 'sequence',
     (d) => { d.segments = [{ from: 400, to: 300, label: 'bad' }]; }, ['invalid y range', 'greater than']],
+  ['sequence: participant sublabel wider than its legible minimum', 'sequence',
+    (d) => { d.participants[0].sublabel = 'This supporting sentence is far too long for one sequence participant'; },
+    ['Sublabel', 'legible', 'shorten the sublabel']],
 
   // ---- dataflow layout rules ----
   ['dataflow: flow missing label', 'dataflow',
@@ -96,6 +102,12 @@ const CASES = [
     (d) => {
       d.flows[0].via = [[195, 140], [195, 260]];
     }, ['diagonal segment', 'align via[0]']],
+  ['dataflow: node sublabel wider than its legible minimum', 'dataflow',
+    (d) => { d.nodes[0].sublabel = 'This supporting sentence is far too long for one data-flow node box'; },
+    ['Sublabel', 'legible', 'increase node.width']],
+  ['dataflow: node tag wider than its legible minimum', 'dataflow',
+    (d) => { d.nodes[0].tag = 'This tag is far too long to sit inside one data-flow node box'; },
+    ['Tag', 'legible', 'increase node.width']],
 
   // ---- lifecycle layout rules ----
   ['lifecycle: missing reserved main lane', 'lifecycle',
@@ -112,6 +124,12 @@ const CASES = [
     }, ['less than 10px apart']],
   ['lifecycle: viewBox height below schema min', 'lifecycle',
     (d) => { d.meta.viewBox = [980, 565]; }, ['566']],
+  ['lifecycle: state sublabel wider than its legible minimum', 'lifecycle',
+    (d) => { d.states[0].sublabel = 'This supporting sentence is far too long for one lifecycle state box'; },
+    ['Sublabel', 'legible', 'increase state.width']],
+  ['lifecycle: state tag wider than its legible minimum', 'lifecycle',
+    (d) => { d.states[0].tag = 'This tag is far too long to sit inside one lifecycle state box'; },
+    ['Tag', 'legible', 'increase state.width']],
 
   // ---- architecture layout rules ----
   ['architecture: components overlap', 'architecture',
@@ -122,37 +140,15 @@ const CASES = [
     (d) => { d.boundaries[0].wraps.push('ghost'); }, ['wraps unknown component "ghost"']],
   ['architecture: label wider than component', 'architecture',
     (d) => { d.components[0].label = 'An Extremely Long Component Label Overflow'; }, ['wider than component', 'shorten the label']],
-  ['architecture: component overlap suggests fix', 'architecture',
-    (d) => { d.components[1].pos = [...d.components[0].pos]; }, ['Suggested fix', 'move "']],
-
-  // ---- sublabel/tag fit: the same rule workflow has always had, on the rest ----
-  // These fields render as one unwrapped <text> per node. Without a width
-  // rule an over-long one passes validation and then paints over its
-  // neighbours, so every renderer must reject what shrink-to-fit cannot save.
   ['architecture: component sublabel wider than its legible minimum', 'architecture',
     (d) => { d.components[0].sublabel = 'This supporting sentence is far too long for one architecture component'; },
     ['Sublabel', 'legible', 'widen size']],
   ['architecture: component tag wider than its legible minimum', 'architecture',
     (d) => { d.components[0].tag = 'This tag is far too long to sit inside one architecture component box'; },
     ['Tag', 'legible', 'widen size']],
-  ['sequence: participant sublabel wider than its legible minimum', 'sequence',
-    (d) => { d.participants[0].sublabel = 'This supporting sentence is far too long for one sequence participant'; },
-    ['Sublabel', 'legible', 'shorten the sublabel']],
-  ['dataflow: node sublabel wider than its legible minimum', 'dataflow',
-    (d) => { d.nodes[0].sublabel = 'This supporting sentence is far too long for one data-flow node box'; },
-    ['Sublabel', 'legible', 'increase node.width']],
-  ['dataflow: node tag wider than its legible minimum', 'dataflow',
-    (d) => { d.nodes[0].tag = 'This tag is far too long to sit inside one data-flow node box'; },
-    ['Tag', 'legible', 'increase node.width']],
-  ['lifecycle: state sublabel wider than its legible minimum', 'lifecycle',
-    (d) => { d.states[0].sublabel = 'This supporting sentence is far too long for one lifecycle state box'; },
-    ['Sublabel', 'legible', 'increase state.width']],
-  ['lifecycle: state tag wider than its legible minimum', 'lifecycle',
-    (d) => { d.states[0].tag = 'This tag is far too long to sit inside one lifecycle state box'; },
-    ['Tag', 'legible', 'increase state.width']],
-  ['workflow: node tag wider than its legible minimum', 'workflow',
-    (d) => { d.nodes[0].tag = 'This tag is far too long to sit inside one workflow node box'; },
-    ['Tag', 'legible', 'increase node.width']],
+  ['architecture: component overlap suggests fix', 'architecture',
+    (d) => { d.components[1].pos = [...d.components[0].pos]; }, ['Suggested fix', 'move "']],
+
 ];
 
 for (const [name, mode, mutate, expected] of CASES) {

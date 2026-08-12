@@ -36,7 +36,7 @@ function canonicalSvg(html) {
 test('all five renderers inherit one resolved-only Route Share Card Export item', () => {
   for (const [mode, example] of Object.entries(CASES)) {
     const html = render(mode, example);
-    assert.match(html, /data-action="route-share-card"[^>]*hidden disabled[^>]*>Route Share Card[\s\S]*?1200(?:&times;|×)630 PNG/, mode);
+    assert.match(html, /data-action="route-share-card"[^>]*hidden disabled[^>]*>[\s\S]*?Route Share Card[\s\S]*?1200(?:&times;|×)630 PNG/, mode);
     assert.match(html, /function syncRouteShareItem\(\)/, mode);
     assert.match(html, /routeShareItem\.hidden = !snapshot;/, mode);
     assert.match(html, /routeShareItem\.disabled = !snapshot;/, mode);

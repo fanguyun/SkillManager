@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.join(here, '..');
 const skill = readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8');
+const authoringContract = readFileSync(path.join(skillRoot, 'references', 'authoring-contract.md'), 'utf8');
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
 
 test('skill description is portable across 1024-character runtimes and remains searchable', () => {
@@ -45,4 +46,18 @@ test('main skill stays a bounded authoring router with progressive references', 
     assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.equal(existsSync(path.join(skillRoot, reference)), true, `${reference} must ship with the skill`);
   }
+});
+
+test('authored diagram copy follows the user language without translating technical identity', () => {
+  assert.match(skill, /language of the user's request/);
+  assert.match(skill, /guided-view labels\/notes.*legend label overrides.*card titles\/items/);
+  assert.match(skill, /product names.*code identifiers.*protocols.*API paths.*environment names/);
+  assert.match(authoringContract, /non-English diagram[\s\S]*`meta\.legend\.entries`/);
+  assert.match(authoringContract, /renderer-owned viewer controls remain separate/);
+});
+
+test('skill keeps the title hierarchy compact by default', () => {
+  assert.match(skill, /Omit `meta\.subtitle` by default/);
+  assert.match(skill, /Never invent a subtitle that restates the title, nodes, or cards/);
+  assert.match(authoringContract, /omitted or blank subtitle must not leave an empty visual row/);
 });

@@ -75,7 +75,7 @@ test('Share Card is a canonical PNG with exact receipt dimensions and filename',
 test('Copy Share Card reuses one canonical card blob and writes only PNG to the clipboard', () => {
   const html = render('architecture');
   assert.match(html, /data-action="copy-share-card"/);
-  assert.match(html, /Copy Share Card[\s\S]*?<span class="hint">PNG<\/span>/);
+  assert.match(html, /Copy Share Card[\s\S]*?<small class="hint">PNG to clipboard<\/small>/);
   assert.match(html, /function runCopyShareCard\(\)[\s\S]*?var blobPromise = rasterizeShareCard\(\);/);
   const copyBlock = html.match(/function runCopyShareCard\(\) \{[\s\S]*?\n      \}/)?.[0] || '';
   assert.equal((copyBlock.match(/rasterizeShareCard\(\)/g) || []).length, 1);

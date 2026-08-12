@@ -75,6 +75,7 @@ test('cli: help lists commands and diagram types', () => {
   assert.match(result.stdout, /archify compare architecture <base\.json> <head\.json>/);
   assert.match(result.stdout, /archify deliver <type>/);
   assert.match(result.stdout, /archify preview <type>/);
+  assert.match(result.stdout, /archify visual-check <output\.html>/);
   assert.match(result.stdout, /--open/);
   assert.match(result.stdout, /archify guide \[scenario or question\]/);
   assert.match(result.stdout, /archify doctor/);
@@ -227,6 +228,22 @@ test('cli: render writes a diagram html file', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(out), true);
   assert.match(fs.readFileSync(out, 'utf8'), /Agent Tool Call Workflow/);
+});
+
+test('cli: visual-check returns a skipped receipt with exit 2 when Chrome is unavailable', () => {
+  const out = path.join(tmp, 'visual-check-skipped.html');
+  fs.writeFileSync(out, '<!doctype html><html><body>delivered</body></html>');
+  const missingChrome = path.join(tmp, 'missing-chrome');
+  const result = run(['visual-check', out, '--json'], {
+    env: { ...process.env, ARCHIFY_CHROME: missingChrome },
+  });
+
+  assert.equal(result.status, 2, result.stderr);
+  const receipt = JSON.parse(result.stdout);
+  assert.equal(receipt.status, 'skipped');
+  assert.equal(receipt.visualReview, 'pending');
+  assert.equal(receipt.chrome.status, 'unavailable');
+  assert.equal(fs.existsSync(out.replace(/\.html$/, '.visual-check.json')), true);
 });
 
 test('cli: deliver atomically writes a checked artifact and structured receipt', () => {

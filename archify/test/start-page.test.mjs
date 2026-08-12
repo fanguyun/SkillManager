@@ -68,7 +68,7 @@ test('start page: offers five bounded bilingual starts without ingesting source 
   assert.doesNotMatch(scriptMatch[1], /innerHTML/);
 });
 
-test('generated artifacts: viewer-only Create yours link carries the exact diagram type', () => {
+test('generated artifacts omit the promotional footer and shortcut manual', () => {
   const examples = {
     architecture: 'web-app.architecture.json',
     workflow: 'agent-tool-call.workflow.json',
@@ -86,16 +86,42 @@ test('generated artifacts: viewer-only Create yours link carries the exact diagr
         out,
       ]);
       const html = fs.readFileSync(out, 'utf8');
-      const expected = `https://tt-a1i.github.io/archify/start.html?type=${type}&amp;source=artifact`;
-      assert.match(html, new RegExp(`class="artifact-start-link"[^>]+href="${expected.replace(/[.?]/g, '\\$&')}"`), type);
-      assert.match(html, /class="artifact-start-link"[^>]+rel="noopener noreferrer"/, `${type}: referrer boundary`);
-      assert.equal((html.match(new RegExp(expected.replace(/[.?]/g, '\\$&'), 'g')) || []).length, 1, type);
+      assert.doesNotMatch(html, /<p class="footer">/, `${type}: footer element`);
+      assert.doesNotMatch(html, /Built with Archify/, `${type}: product signature`);
+      assert.doesNotMatch(html, /Create yours/, `${type}: promotional CTA`);
+      assert.doesNotMatch(html, /Hover to trace/, `${type}: shortcut manual`);
+      assert.doesNotMatch(html, /source=artifact/, `${type}: removed artifact CTA URL`);
+      assert.match(html, /id="btn-diagram-guide"/, `${type}: diagram guide remains available`);
 
       const svg = html.match(/<svg[\s\S]*?<\/svg>/)?.[0];
       assert.ok(svg, `${type}: SVG missing`);
-      assert.ok(!svg.includes('Create yours'), `${type}: CTA leaked into canonical SVG`);
-      assert.ok(!svg.includes('/start.html'), `${type}: start URL leaked into canonical SVG`);
     }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('viewer gives wide screens a larger canvas without forcing a subtitle row', () => {
+  const template = fs.readFileSync(path.join(skillRoot, 'assets', 'template.html'), 'utf8');
+  assert.match(template, /max-width: var\(--archify-reader-width, 1440px\)/);
+  assert.match(template, /Archify\.readerLayout = \(function \(\)/);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'archify-title-hierarchy-'));
+  try {
+    const input = JSON.parse(fs.readFileSync(
+      path.join(skillRoot, 'examples', 'web-app.architecture.json'),
+      'utf8',
+    ));
+    delete input.meta.subtitle;
+    const source = path.join(tmp, 'without-subtitle.architecture.json');
+    const output = path.join(tmp, 'without-subtitle.html');
+    fs.writeFileSync(source, `${JSON.stringify(input, null, 2)}\n`);
+    execFileSync(process.execPath, [
+      path.join(skillRoot, 'renderers', 'architecture', 'render-architecture.mjs'),
+      source,
+      output,
+    ]);
+    assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /class="subtitle"/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

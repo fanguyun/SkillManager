@@ -36,7 +36,7 @@ function canonicalSvg(html) {
 test('all five renderers inherit one active-reach-only Reach Share Card item', () => {
   for (const [mode, example] of Object.entries(CASES)) {
     const html = render(mode, example);
-    assert.match(html, /data-action="reach-share-card"[^>]*hidden disabled[^>]*>Reach Share Card[\s\S]*?1200(?:&times;|×)630 PNG/, mode);
+    assert.match(html, /data-action="reach-share-card"[^>]*hidden disabled[^>]*>[\s\S]*?Reach Share Card[\s\S]*?1200(?:&times;|×)630 PNG/, mode);
     assert.match(html, /function syncReachShareItem\(\)/, mode);
     assert.match(html, /reachShareItem\.hidden = !snapshot;/, mode);
     assert.match(html, /reachShareItem\.disabled = !snapshot;/, mode);
