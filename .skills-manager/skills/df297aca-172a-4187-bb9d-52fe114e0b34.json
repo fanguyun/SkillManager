@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "df297aca-172a-4187-bb9d-52fe114e0b34",
+  "path": "cialdini-influence",
+  "path_key": "cialdini-influence",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/cialdini-influence",
+    "branch": null
+  }
+}

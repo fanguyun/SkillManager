@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "70f85429-8a44-4cce-a940-ee09c04f8698",
+  "path": "周期",
+  "path_key": "周期",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/周期",
+    "branch": null
+  }
+}

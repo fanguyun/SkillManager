@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0763008b-8214-4014-b607-179c03aaf665",
+  "path": "100天内自学英文翻转人生",
+  "path_key": "100天内自学英文翻转人生",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/100天内自学英文翻转人生",
+    "branch": null
+  }
+}

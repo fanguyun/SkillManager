@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7c8613ef-05b3-4ed4-ab4b-c4e9db96bf1f",
+  "path": "naval-wealth-happiness",
+  "path_key": "naval-wealth-happiness",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/naval-wealth-happiness",
+    "branch": null
+  }
+}

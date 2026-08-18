@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "6190f032-8cbd-456b-bdec-cbeffcde2bda",
+  "path": "100ls-language-learning-coach",
+  "path_key": "100ls-language-learning-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/100ls-language-learning-coach",
+    "branch": null
+  }
+}

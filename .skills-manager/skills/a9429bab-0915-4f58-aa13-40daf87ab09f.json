@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a9429bab-0915-4f58-aa13-40daf87ab09f",
+  "path": "逆转思维",
+  "path_key": "逆转思维",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/逆转思维",
+    "branch": null
+  }
+}

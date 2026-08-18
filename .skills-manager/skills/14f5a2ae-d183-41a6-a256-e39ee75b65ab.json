@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "14f5a2ae-d183-41a6-a256-e39ee75b65ab",
+  "path": "100ls-language-learning",
+  "path_key": "100ls-language-learning",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/100ls-language-learning",
+    "branch": null
+  }
+}

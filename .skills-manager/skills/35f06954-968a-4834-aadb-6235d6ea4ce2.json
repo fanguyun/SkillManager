@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "35f06954-968a-4834-aadb-6235d6ea4ce2",
+  "path": "计算机是如何工作的",
+  "path_key": "计算机是如何工作的",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/计算机是如何工作的",
+    "branch": null
+  }
+}

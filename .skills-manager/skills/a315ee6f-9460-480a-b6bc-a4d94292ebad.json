@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a315ee6f-9460-480a-b6bc-a4d94292ebad",
+  "path": "cialdini-influence-coach",
+  "path_key": "cialdini-influence-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/cialdini-influence-coach",
+    "branch": null
+  }
+}

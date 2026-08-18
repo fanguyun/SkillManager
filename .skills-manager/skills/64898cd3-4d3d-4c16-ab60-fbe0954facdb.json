@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "64898cd3-4d3d-4c16-ab60-fbe0954facdb",
+  "path": "无条件养育",
+  "path_key": "无条件养育",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/无条件养育",
+    "branch": null
+  }
+}

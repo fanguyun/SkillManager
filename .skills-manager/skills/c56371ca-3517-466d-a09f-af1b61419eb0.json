@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c56371ca-3517-466d-a09f-af1b61419eb0",
+  "path": "涛动周期论",
+  "path_key": "涛动周期论",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/涛动周期论",
+    "branch": null
+  }
+}

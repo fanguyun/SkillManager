@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "6a59c643-dc2e-4d38-9deb-c73a19d4f9bc",
+  "path": "how-computers-work",
+  "path_key": "how-computers-work",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/how-computers-work",
+    "branch": null
+  }
+}

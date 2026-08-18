@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ada0ed42-e10c-4813-bcb0-5348b74e66c0",
+  "path": "reverse-thinking-mindset-coach",
+  "path_key": "reverse-thinking-mindset-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/reverse-thinking-mindset-coach",
+    "branch": null
+  }
+}

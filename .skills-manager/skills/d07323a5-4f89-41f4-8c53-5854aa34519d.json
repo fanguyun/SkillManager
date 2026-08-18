@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d07323a5-4f89-41f4-8c53-5854aa34519d",
+  "path": "zhou-jintao-cycle-theory",
+  "path_key": "zhou-jintao-cycle-theory",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/zhou-jintao-cycle-theory",
+    "branch": null
+  }
+}

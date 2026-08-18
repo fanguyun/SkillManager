@@ -6,9 +6,9 @@
   "enabled": true,
   "tags": [],
   "source": {
-    "type": "skillssh",
-    "ref": "jpcwhj/job-hunt/job-hunt",
-    "subpath": "skills/job-hunt",
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "job-hunt",
     "branch": null
   }
 }

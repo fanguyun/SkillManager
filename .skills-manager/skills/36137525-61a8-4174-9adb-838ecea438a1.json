@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "36137525-61a8-4174-9adb-838ecea438a1",
+  "path": "marks-market-cycles",
+  "path_key": "marks-market-cycles",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/marks-market-cycles",
+    "branch": null
+  }
+}

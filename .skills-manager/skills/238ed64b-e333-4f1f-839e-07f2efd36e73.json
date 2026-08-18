@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "238ed64b-e333-4f1f-839e-07f2efd36e73",
+  "path": "kohn-unconditional-parenting-coach",
+  "path_key": "kohn-unconditional-parenting-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/kohn-unconditional-parenting-coach",
+    "branch": null
+  }
+}

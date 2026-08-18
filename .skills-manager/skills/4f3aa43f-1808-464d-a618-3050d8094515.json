@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "4f3aa43f-1808-464d-a618-3050d8094515",
+  "path": "gen-i18n",
+  "path_key": "gen-i18n",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "gen-i18n",
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "281f62e9-e16b-4b13-b4c5-ecce0bb453f6",
+  "path": "how-computers-work-coach",
+  "path_key": "how-computers-work-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/how-computers-work-coach",
+    "branch": null
+  }
+}

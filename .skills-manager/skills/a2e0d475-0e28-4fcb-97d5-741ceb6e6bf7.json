@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a2e0d475-0e28-4fcb-97d5-741ceb6e6bf7",
+  "path": "纳瓦尔宝典",
+  "path_key": "纳瓦尔宝典",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/纳瓦尔宝典",
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "188b89b4-8a15-4b15-baa0-06fa4cc1ddc2",
+  "path": "naval-wealth-happiness-coach",
+  "path_key": "naval-wealth-happiness-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "subpath": "books/.agents/skills/naval-wealth-happiness-coach",
+    "branch": null
+  }
+}
