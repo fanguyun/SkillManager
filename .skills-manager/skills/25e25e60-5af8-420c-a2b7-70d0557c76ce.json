@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "25e25e60-5af8-420c-a2b7-70d0557c76ce",
+  "path": "12306",
+  "path_key": "12306",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "kirorab/12306-skill/12306",
+    "subpath": null,
+    "branch": null
+  }
+}
