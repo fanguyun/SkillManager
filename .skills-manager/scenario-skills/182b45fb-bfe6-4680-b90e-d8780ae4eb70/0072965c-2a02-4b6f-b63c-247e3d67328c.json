@@ -13,6 +13,7 @@
     "continue": true,
     "crush": true,
     "cursor": true,
+    "deepseek_harness": true,
     "droid": true,
     "gemini_cli": true,
     "github_copilot": true,
