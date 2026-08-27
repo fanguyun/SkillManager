@@ -1,0 +1,7 @@
+interface:
+  display_name: "读书助手"
+  short_description: "分析书籍价值并给出结构化阅读路径"
+  default_prompt: "使用 $reading-assistant 分析这本书，并给出可执行的阅读建议。"
+
+policy:
+  allow_implicit_invocation: true

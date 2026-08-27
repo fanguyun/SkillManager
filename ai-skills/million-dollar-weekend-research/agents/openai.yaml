@@ -1,0 +1,7 @@
+interface:
+  display_name: "百万周末项目调研"
+  short_description: "用真实用户证据快速验证项目机会"
+  default_prompt: "使用 $million-dollar-weekend-research 调研并验证一个项目或商业点子。"
+
+policy:
+  allow_implicit_invocation: true

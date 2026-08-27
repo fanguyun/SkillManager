@@ -1,0 +1,7 @@
+interface:
+  display_name: "Base Guidelines"
+  short_description: "中文全局编码基准：先澄清、最小改动、避免过度设计、按可验证目标执行"
+  default_prompt: "使用 $base-guidelines 约束当前编码、review 或重构任务。"
+
+policy:
+  allow_implicit_invocation: true

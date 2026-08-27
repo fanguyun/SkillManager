@@ -1,0 +1,4 @@
+interface:
+  display_name: "H5 兼容性检查"
+  short_description: "检查 H5 在旧安卓、旧 iPhone、微信和桌面端的兼容性"
+  default_prompt: "使用 $h5-compat-audit 审查一个 H5 页面或前端代码库，检查其在安卓 6+、iPhone 7 之前机型、微信内浏览器和桌面端浏览器中的兼容性风险。"
