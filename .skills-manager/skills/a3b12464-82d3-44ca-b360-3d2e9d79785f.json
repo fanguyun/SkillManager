@@ -1,12 +1,10 @@
 {
   "schema_version": 1,
-  "skill_id": "195ba0cd-6033-4fc6-a9f7-53dc3345b68c",
-  "path": "books",
-  "path_key": "books",
+  "skill_id": "a3b12464-82d3-44ca-b360-3d2e9d79785f",
+  "path": "project-security-scan",
+  "path_key": "project-security-scan",
   "enabled": true,
-  "tags": [
-    "book"
-  ],
+  "tags": [],
   "source": {
     "type": "local",
     "ref": null,
