@@ -5,7 +5,7 @@
 ## 适用场景
 
 - 仓库、应用目录或 workspace 的发布前安全审计
-- npm、Yarn、pnpm 依赖漏洞与生产可达性核查
+- npm、Yarn、pnpm 依赖漏洞、生产可达性与维护兼容性核查
 - 认证授权、输入校验、注入、XSS、SSRF、文件处理和供应链风险审计
 - Dockerfile、CI/CD、部署配置和秘密暴露风险检查
 

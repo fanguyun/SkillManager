@@ -25,6 +25,7 @@
 - Dockerfile 是否使用非 root 用户、最小运行时镜像和明确的生产依赖安装阶段；构建上下文是否排除敏感文件。
 - CI/CD 是否避免打印 secrets，依赖安装是否锁定 lockfile，发布令牌是否被限制到最小权限与正确环境。
 - 包的安装脚本、原生二进制下载、私有 registry、Git URL 依赖和弃用/接管包是否有来源与完整性风险证据。
+- 对直接生产依赖、存在 advisory 的传递依赖和高影响包，核对 `deprecated`、发布与迁移信息、`engines.node`、`peerDependencies`；没有证据时标为“待确认”，而非“受支持”。
 
 ## 日志、错误与默认配置
 
