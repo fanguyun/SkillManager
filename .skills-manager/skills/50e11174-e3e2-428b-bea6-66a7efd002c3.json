@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "50e11174-e3e2-428b-bea6-66a7efd002c3",
+  "path": "naval-wealth-happiness",
+  "path_key": "naval-wealth-happiness",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

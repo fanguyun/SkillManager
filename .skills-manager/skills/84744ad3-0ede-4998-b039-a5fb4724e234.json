@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "84744ad3-0ede-4998-b039-a5fb4724e234",
+  "path": "how-computers-work-coach",
+  "path_key": "how-computers-work-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

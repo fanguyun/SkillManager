@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ce975586-2fd1-487e-b5e8-43e56a23e8f7",
+  "path": "zhou-jintao-cycle-theory-coach",
+  "path_key": "zhou-jintao-cycle-theory-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

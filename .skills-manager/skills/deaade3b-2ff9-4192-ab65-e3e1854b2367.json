@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "deaade3b-2ff9-4192-ab65-e3e1854b2367",
+  "path": "涛动周期论",
+  "path_key": "涛动周期论",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "5a8f9ece-d669-4b09-9b1c-42a2b167ea31",
+  "path": "zhou-jintao-cycle-theory",
+  "path_key": "zhou-jintao-cycle-theory",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

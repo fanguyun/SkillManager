@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "2332f42c-6058-4565-bbe2-becd7dedcfea",
+  "path": "reverse-thinking-mindset",
+  "path_key": "reverse-thinking-mindset",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

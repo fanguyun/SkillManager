@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "3191f968-d525-48d3-8e6c-a0df59f0ffd1",
+  "path": "无条件养育",
+  "path_key": "无条件养育",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

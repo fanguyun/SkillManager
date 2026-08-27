@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "fd9392f5-21cd-40a2-a6ca-ebefafd2e192",
+  "path": "100ls-language-learning",
+  "path_key": "100ls-language-learning",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

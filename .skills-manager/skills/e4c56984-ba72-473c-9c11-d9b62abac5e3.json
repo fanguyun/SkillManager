@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e4c56984-ba72-473c-9c11-d9b62abac5e3",
+  "path": "kohn-unconditional-parenting-coach",
+  "path_key": "kohn-unconditional-parenting-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "243d9e4d-0e04-4884-89a5-e3155e7fa9d9",
+  "path": "kohn-unconditional-parenting",
+  "path_key": "kohn-unconditional-parenting",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

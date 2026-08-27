@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "df467328-d9e2-4bf0-bbc5-7f3d486b21e0",
+  "path": "reverse-thinking-mindset-coach",
+  "path_key": "reverse-thinking-mindset-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

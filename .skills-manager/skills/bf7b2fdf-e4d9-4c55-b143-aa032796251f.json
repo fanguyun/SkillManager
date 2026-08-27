@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "bf7b2fdf-e4d9-4c55-b143-aa032796251f",
+  "path": "marks-market-cycles",
+  "path_key": "marks-market-cycles",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "982a4bc6-9f86-42c1-82d2-1ac480a59e47",
+  "path": "计算机是如何工作的",
+  "path_key": "计算机是如何工作的",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
