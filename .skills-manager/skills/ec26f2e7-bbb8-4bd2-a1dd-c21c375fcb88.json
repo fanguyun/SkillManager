@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ec26f2e7-bbb8-4bd2-a1dd-c21c375fcb88",
+  "path": "books",
+  "path_key": "books",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

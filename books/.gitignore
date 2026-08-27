@@ -1,0 +1,10 @@
+# Local source books are kept on disk but should not be pushed to the remote repo.
+*.epub
+*.mobi
+*.pdf
+
+# OS / editor noise
+.DS_Store
+*.tmp
+*.temp
+*.swp
