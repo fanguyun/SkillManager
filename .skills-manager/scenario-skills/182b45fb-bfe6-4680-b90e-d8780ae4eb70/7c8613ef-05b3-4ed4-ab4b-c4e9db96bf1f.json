@@ -11,6 +11,7 @@
     "github_copilot": true,
     "openclaw": true,
     "qclaw": true,
-    "trae": true
+    "trae": true,
+    "warp": true
   }
 }
