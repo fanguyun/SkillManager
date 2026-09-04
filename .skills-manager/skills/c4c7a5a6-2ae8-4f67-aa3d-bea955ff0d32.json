@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c4c7a5a6-2ae8-4f67-aa3d-bea955ff0d32",
+  "path": "multi-mental-models",
+  "path_key": "multi-mental-models",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

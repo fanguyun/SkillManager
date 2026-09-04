@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "8e192af2-5ee4-441f-b54c-0bbfc08193fd",
+  "path": "gen-i18n (2)",
+  "path_key": "gen-i18n (2)",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "23d62387-fb37-41d0-b623-fe0cd1b1ca58",
+  "path": "marks-market-cycles-coach",
+  "path_key": "marks-market-cycles-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

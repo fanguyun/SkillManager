@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "63d794de-1d94-450a-8a2e-6913106a0632",
+  "path": "cialdini-influence-coach",
+  "path_key": "cialdini-influence-coach",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

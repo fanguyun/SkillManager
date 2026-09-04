@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "36b45ce1-9df0-49b0-9756-7ac840f86d45",
+  "path": "dca-strategy",
+  "path_key": "dca-strategy",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

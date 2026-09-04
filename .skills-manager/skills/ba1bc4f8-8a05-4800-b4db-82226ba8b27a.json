@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ba1bc4f8-8a05-4800-b4db-82226ba8b27a",
+  "path": "100ls-language-learning-coach (2)",
+  "path_key": "100ls-language-learning-coach (2)",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "scenario_id": "182b45fb-bfe6-4680-b90e-d8780ae4eb70",
   "skill_id": "d85fd029-71d9-4707-bbe2-5270afd59efe",
-  "sort_order": 176,
+  "sort_order": 168,
   "tools": {
     "amp": true,
     "antigravity": true,
@@ -14,6 +14,7 @@
     "continue": true,
     "crush": true,
     "cursor": true,
+    "deepseek_harness": true,
     "droid": true,
     "gemini_cli": true,
     "github_copilot": true,
@@ -23,17 +24,16 @@
     "mcpjam": true,
     "mux": true,
     "neovate": true,
-    "openclaw": true,
     "opencode": true,
     "openhands": true,
     "pi": true,
-    "qclaw": true,
     "qoder": true,
     "qwen_code": true,
     "roo_code": true,
     "trae": true,
     "warp": true,
     "windsurf": true,
+    "workbuddy": true,
     "zencoder": true
   }
 }

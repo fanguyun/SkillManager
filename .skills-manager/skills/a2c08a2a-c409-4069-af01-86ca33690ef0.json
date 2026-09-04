@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a2c08a2a-c409-4069-af01-86ca33690ef0",
+  "path": "skill-builder",
+  "path_key": "skill-builder",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

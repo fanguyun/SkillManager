@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "2b323988-fb36-4795-acfb-81e24ee05285",
+  "path": "reading-assistant",
+  "path_key": "reading-assistant",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

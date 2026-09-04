@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "cf0387b3-7ff8-494c-a3d4-f7c39ddd6317",
+  "path": "逆转思维 (2)",
+  "path_key": "逆转思维 (2)",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

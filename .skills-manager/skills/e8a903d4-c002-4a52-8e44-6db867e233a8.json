@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e8a903d4-c002-4a52-8e44-6db867e233a8",
+  "path": "周期 (2)",
+  "path_key": "周期 (2)",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

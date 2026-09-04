@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b7260cfc-543e-47ce-bece-b8a196cef6c8",
+  "path": "纳瓦尔宝典 (2)",
+  "path_key": "纳瓦尔宝典 (2)",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

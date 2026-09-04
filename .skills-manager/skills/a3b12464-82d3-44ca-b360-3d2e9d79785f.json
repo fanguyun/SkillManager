@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a3b12464-82d3-44ca-b360-3d2e9d79785f",
+  "path": "project-security-scan",
+  "path_key": "project-security-scan",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

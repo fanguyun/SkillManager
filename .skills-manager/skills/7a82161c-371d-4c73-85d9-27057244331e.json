@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7a82161c-371d-4c73-85d9-27057244331e",
+  "path": "naval-wealth-happiness-coach (2)",
+  "path_key": "naval-wealth-happiness-coach (2)",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

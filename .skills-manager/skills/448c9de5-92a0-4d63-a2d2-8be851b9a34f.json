@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "448c9de5-92a0-4d63-a2d2-8be851b9a34f",
+  "path": "ui-skills-root",
+  "path_key": "ui-skills-root",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

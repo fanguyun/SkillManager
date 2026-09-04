@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "de024600-4605-4e73-9532-08e73c71ca1d",
+  "path": "影响力",
+  "path_key": "影响力",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

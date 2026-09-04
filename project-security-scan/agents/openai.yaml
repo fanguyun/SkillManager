@@ -1,0 +1,7 @@
+interface:
+  display_name: "项目安全审计"
+  short_description: "审计 Node.js 项目的依赖、代码与交付配置风险"
+  default_prompt: "使用 $project-security-scan 对当前 Node.js/TypeScript 项目执行只读的项目安全审计，检查生产依赖、业务代码和交付配置，并输出含证据、可达性和修复建议的报告。"
+
+policy:
+  allow_implicit_invocation: true

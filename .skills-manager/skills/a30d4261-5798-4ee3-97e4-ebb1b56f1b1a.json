@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a30d4261-5798-4ee3-97e4-ebb1b56f1b1a",
+  "path": "million-dollar-weekend-research",
+  "path_key": "million-dollar-weekend-research",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
