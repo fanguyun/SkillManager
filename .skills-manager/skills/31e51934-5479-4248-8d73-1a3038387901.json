@@ -4,11 +4,13 @@
   "path": "base-guidelines",
   "path_key": "base-guidelines",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
     "subpath": "base-guidelines",
-    "branch": null
+    "branch": "main"
   }
 }

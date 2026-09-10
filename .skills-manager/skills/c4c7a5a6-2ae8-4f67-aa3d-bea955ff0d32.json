@@ -4,7 +4,9 @@
   "path": "multi-mental-models",
   "path_key": "multi-mental-models",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
     "type": "git",
     "ref": "https://github.com/fanguyun/ai-skills.git",
