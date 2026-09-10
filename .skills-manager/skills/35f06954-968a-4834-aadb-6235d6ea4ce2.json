@@ -9,8 +9,8 @@
   ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "books/.agents/skills/计算机是如何工作的",
-    "branch": null
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/计算机是如何工作的",
+    "branch": "main"
   }
 }

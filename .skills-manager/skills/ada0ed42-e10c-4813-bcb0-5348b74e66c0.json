@@ -9,8 +9,8 @@
   ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "books/.agents/skills/reverse-thinking-mindset-coach",
-    "branch": null
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/reverse-thinking-mindset-coach",
+    "branch": "main"
   }
 }
