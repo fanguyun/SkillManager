@@ -20,6 +20,7 @@
 - 未经转译或缺少 polyfill 的 ES2015+ 支持不完整
 - `fetch`、`FormData`、文件上传行为存在碎片化
 - flexbox 细节和老 viewport bug
+- 不使用 `gap` 属性或 CSS Grid 布局；使用 flex 配合子项 `margin`、百分比宽度或普通块布局作为兼容方案
 - 大动画、图表、长列表性能弱
 - 自动播放、内联视频和权限流程边界问题
 

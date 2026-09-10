@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "2acbfa60-909d-4811-8259-8caaa09ce9da",
+  "path": "h5-compat-audit",
+  "path_key": "h5-compat-audit",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}
