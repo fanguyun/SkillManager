@@ -4,7 +4,9 @@
   "path": "影响力",
   "path_key": "影响力",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "local",
     "ref": null,

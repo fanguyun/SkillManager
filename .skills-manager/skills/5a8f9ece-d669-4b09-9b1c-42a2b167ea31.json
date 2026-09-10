@@ -4,7 +4,9 @@
   "path": "zhou-jintao-cycle-theory",
   "path_key": "zhou-jintao-cycle-theory",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "local",
     "ref": null,

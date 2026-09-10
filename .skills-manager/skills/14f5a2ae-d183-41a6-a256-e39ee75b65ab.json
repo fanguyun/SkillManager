@@ -4,7 +4,9 @@
   "path": "100ls-language-learning",
   "path_key": "100ls-language-learning",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
     "ref": "https://github.com/fanguyun/SkillManager.git",

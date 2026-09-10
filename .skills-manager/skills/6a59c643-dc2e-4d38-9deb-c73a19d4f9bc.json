@@ -4,7 +4,9 @@
   "path": "how-computers-work",
   "path_key": "how-computers-work",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
     "ref": "https://github.com/fanguyun/SkillManager.git",

@@ -4,7 +4,9 @@
   "path": "kohn-unconditional-parenting",
   "path_key": "kohn-unconditional-parenting",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "local",
     "ref": null,

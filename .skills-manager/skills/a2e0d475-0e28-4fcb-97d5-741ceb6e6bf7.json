@@ -4,7 +4,9 @@
   "path": "纳瓦尔宝典",
   "path_key": "纳瓦尔宝典",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
     "ref": "https://github.com/fanguyun/SkillManager.git",

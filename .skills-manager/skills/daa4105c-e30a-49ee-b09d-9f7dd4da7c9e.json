@@ -4,7 +4,9 @@
   "path": "cialdini-influence",
   "path_key": "cialdini-influence",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "local",
     "ref": null,

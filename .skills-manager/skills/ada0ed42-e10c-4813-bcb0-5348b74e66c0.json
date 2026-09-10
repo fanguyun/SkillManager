@@ -4,7 +4,9 @@
   "path": "reverse-thinking-mindset-coach",
   "path_key": "reverse-thinking-mindset-coach",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
     "ref": "https://github.com/fanguyun/SkillManager.git",

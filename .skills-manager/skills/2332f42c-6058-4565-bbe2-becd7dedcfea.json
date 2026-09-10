@@ -4,7 +4,9 @@
   "path": "reverse-thinking-mindset",
   "path_key": "reverse-thinking-mindset",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "local",
     "ref": null,
