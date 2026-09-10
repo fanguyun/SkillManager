@@ -4,11 +4,13 @@
   "path": "zhou-jintao-cycle-theory-coach",
   "path_key": "zhou-jintao-cycle-theory-coach",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
-    "type": "local",
-    "ref": null,
-    "subpath": null,
-    "branch": null
+    "type": "git",
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/zhou-jintao-cycle-theory-coach",
+    "branch": "main"
   }
 }

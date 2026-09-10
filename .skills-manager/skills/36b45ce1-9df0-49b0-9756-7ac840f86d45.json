@@ -4,11 +4,13 @@
   "path": "dca-strategy",
   "path_key": "dca-strategy",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
-    "type": "import",
-    "ref": null,
-    "subpath": null,
-    "branch": null
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "dca-strategy",
+    "branch": "main"
   }
 }

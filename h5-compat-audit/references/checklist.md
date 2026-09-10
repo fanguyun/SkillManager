@@ -21,7 +21,8 @@
 
 检查：
 
-- 是否依赖 flex `gap`
+- 是否使用 `gap` 属性（包括 flex 和 grid）
+- 是否使用 CSS Grid（包括 `display: grid`、`grid-template-*` 等属性）
 - `position: sticky`
 - `100vh` / `100dvh` / 软键盘下的视口处理
 - `backdrop-filter`、重模糊、复杂遮罩
@@ -31,7 +32,7 @@
 
 常见修复：
 
-- 用 margin 替代 `gap`
+- 安卓 6+ 不使用 `gap` 或 CSS Grid；用 flex 配合子项 `margin`、百分比宽度或普通块布局替代
 - 提供非 sticky 降级
 - 避免移动端强依赖满高布局
 - 降低模糊和多层叠加效果

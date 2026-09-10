@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "skill_id": "0072965c-2a02-4b6f-b63c-247e3d67328c",
-  "path": "find-skills-2",
-  "path_key": "find-skills-2",
+  "path": "find-skills",
+  "path_key": "find-skills",
   "enabled": true,
   "tags": [],
   "source": {

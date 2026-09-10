@@ -4,11 +4,13 @@
   "path": "learning-mentor",
   "path_key": "learning-mentor",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "learning-mentor-2",
-    "branch": null
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "learning-mentor",
+    "branch": "main"
   }
 }

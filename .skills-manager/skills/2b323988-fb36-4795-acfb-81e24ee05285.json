@@ -4,11 +4,13 @@
   "path": "reading-assistant",
   "path_key": "reading-assistant",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
-    "type": "local",
-    "ref": null,
-    "subpath": null,
-    "branch": null
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "reading-assistant",
+    "branch": "main"
   }
 }

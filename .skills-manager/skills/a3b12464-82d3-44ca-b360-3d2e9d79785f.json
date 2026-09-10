@@ -4,11 +4,13 @@
   "path": "project-security-scan",
   "path_key": "project-security-scan",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
-    "type": "local",
-    "ref": null,
-    "subpath": null,
-    "branch": null
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "project-security-scan",
+    "branch": "main"
   }
 }

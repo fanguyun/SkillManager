@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "35c7c34f-7251-44f1-89da-9f0f29d3d284",
+  "path": "image-to-code",
+  "path_key": "image-to-code",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

@@ -4,11 +4,13 @@
   "path": "marks-market-cycles",
   "path_key": "marks-market-cycles",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "books/.agents/skills/marks-market-cycles",
-    "branch": null
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/marks-market-cycles",
+    "branch": "main"
   }
 }

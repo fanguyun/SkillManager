@@ -4,11 +4,13 @@
   "path": "git-commit-message",
   "path_key": "git-commit-message",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
-    "type": "local",
-    "ref": null,
-    "subpath": null,
-    "branch": null
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "git-commit-message",
+    "branch": "main"
   }
 }

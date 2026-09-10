@@ -30,7 +30,7 @@ description: 审查 H5 页面和前端代码在安卓 6+、iPhone 7 之前机型
 先检查这些内容，因为它们最容易在目标设备上出问题：
 
 - 需要较新引擎的 JS 语法和 API：可选链、空值合并、`Promise.finally`、`IntersectionObserver`、`ResizeObserver`、`URLSearchParams`、`fetch` 的边界行为、剪贴板和分享 API。
-- 旧设备支持较弱的 CSS 特性：flex `gap`、`position: sticky`、动态视口单位、`backdrop-filter`、移动端 `100vh`、`env(safe-area-inset-*)`、过度依赖 `aspect-ratio`。
+- 旧设备支持较弱的 CSS 特性：`gap`、CSS Grid、`position: sticky`、动态视口单位、`backdrop-filter`、移动端 `100vh`、`env(safe-area-inset-*)`、过度依赖 `aspect-ratio`。面向安卓 6+ 时，样式中不要使用 `gap` 或 Grid 布局；使用 flex 配合子项 `margin`、百分比宽度或普通块布局降级。
 - 布局与交互问题：底部固定栏、软键盘遮挡、嵌套滚动区、被动滚动处理、iOS 上的 `overflow: scroll`、点击延迟、点击高亮、变换父节点里的 `position: fixed`。
 - 媒体与上传行为：自动播放限制、内联视频、canvas 尺寸上限、EXIF 方向、文件选择与拍照、超大图片的内存压力。
 - 微信特有问题：JS-SDK 就绪时机、分享流程假设、返回和历史行为、外链点击与跳转限制（诱导、下载、中间页）、OAuth 跳转、字体缩放、viewport 怪异行为。

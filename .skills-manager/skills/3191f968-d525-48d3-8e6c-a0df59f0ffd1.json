@@ -4,11 +4,13 @@
   "path": "无条件养育",
   "path_key": "无条件养育",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
-    "type": "local",
-    "ref": null,
-    "subpath": null,
-    "branch": null
+    "type": "git",
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/无条件养育",
+    "branch": "main"
   }
 }

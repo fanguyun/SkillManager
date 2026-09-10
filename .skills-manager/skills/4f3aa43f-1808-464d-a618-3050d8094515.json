@@ -4,11 +4,13 @@
   "path": "gen-i18n",
   "path_key": "gen-i18n",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "personal-skill"
+  ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
     "subpath": "gen-i18n",
-    "branch": null
+    "branch": "main"
   }
 }

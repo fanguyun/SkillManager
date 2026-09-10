@@ -115,7 +115,7 @@ ln -s /path/to/h5-compat-audit ~/.claude/skills/h5-compat-audit
 ## 适合检查的问题类型
 
 - 可选链、空值合并、`Promise.finally` 等语法或 API 风险
-- flex `gap`、`position: sticky`、`100vh`、`backdrop-filter` 等 CSS 风险
+- `gap`、CSS Grid、`position: sticky`、`100vh`、`backdrop-filter` 等 CSS 风险；安卓 6+ 样式不使用 `gap` 或 Grid 布局
 - fixed 底栏、软键盘遮挡、嵌套滚动、触摸交互问题
 - 视频自动播放、canvas 内存压力、图片过大、文件上传问题
 - 微信 JS-SDK、分享、OAuth、支付、跳转和 history 相关问题

@@ -4,11 +4,13 @@
   "path": "100ls-language-learning-coach",
   "path_key": "100ls-language-learning-coach",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "books/.agents/skills/100ls-language-learning-coach",
-    "branch": null
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/100ls-language-learning-coach",
+    "branch": "main"
   }
 }

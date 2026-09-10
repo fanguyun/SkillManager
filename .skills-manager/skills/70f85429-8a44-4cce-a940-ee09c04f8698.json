@@ -4,11 +4,13 @@
   "path": "周期",
   "path_key": "周期",
   "enabled": true,
-  "tags": [],
+  "tags": [
+    "book-skill"
+  ],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "books/.agents/skills/周期",
-    "branch": null
+    "ref": "https://github.com/fanguyun/books.git",
+    "subpath": ".agents/skills/周期",
+    "branch": "main"
   }
 }

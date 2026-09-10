@@ -1,6 +1,6 @@
 interface:
   display_name: "长期复利定投系统"
-  short_description: "每月定投资产配置：美股成长、A 股宽基、黄金与现金缓冲"
+  short_description: "结合家庭资产负债和现金流的每月定投资产配置"
   default_prompt: "使用 $dca-strategy 完成对应任务。"
 
 policy:

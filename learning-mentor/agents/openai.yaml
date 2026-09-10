@@ -1,0 +1,15 @@
+interface:
+  display_name: "学习导师 Learning Mentor"
+  short_description: "世界顶尖学习策略专家，为你制定立即可执行的个性化学习方案"
+  brand_color: "#6366F1"
+
+policy:
+  allow_implicit_invocation: true
+
+# dependencies:
+#   tools:
+#     - type: "mcp"
+#       value: "toolName"
+#       description: "What this tool does"
+#       transport: "streamable_http"
+#       url: "https://example.com/mcp"
