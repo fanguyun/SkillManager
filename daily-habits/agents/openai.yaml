@@ -1,0 +1,7 @@
+interface:
+  display_name: "日常习惯设计 Daily Habits"
+  short_description: "睡眠作息、久坐打断、进食节律与生活习惯的可执行改法"
+  brand_color: "#7C5E0E"
+
+policy:
+  allow_implicit_invocation: true

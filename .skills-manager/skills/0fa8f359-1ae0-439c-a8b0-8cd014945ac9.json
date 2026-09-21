@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0fa8f359-1ae0-439c-a8b0-8cd014945ac9",
+  "path": "sbs-training",
+  "path_key": "sbs-training",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "borisghidaglia/science-based-lifter/sbs-training",
+    "subpath": "skills/sbs-training",
+    "branch": null
+  }
+}

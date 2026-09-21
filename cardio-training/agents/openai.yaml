@@ -1,0 +1,7 @@
+interface:
+  display_name: "有氧与心肺训练 Cardio Training"
+  short_description: "按心率区间与周训练量，排出可执行的有氧处方与力量搭配"
+  brand_color: "#0E7C7B"
+
+policy:
+  allow_implicit_invocation: true

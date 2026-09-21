@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "f618d513-55ae-4bcc-bf31-a203d267ddf5",
+  "path": "schoenfeld-hypertrophy",
+  "path_key": "schoenfeld-hypertrophy",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "borisghidaglia/science-based-lifter/schoenfeld-hypertrophy",
+    "subpath": "skills/schoenfeld-hypertrophy",
+    "branch": null
+  }
+}

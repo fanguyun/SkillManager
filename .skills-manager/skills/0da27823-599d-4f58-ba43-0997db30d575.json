@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0da27823-599d-4f58-ba43-0997db30d575",
+  "path": "daily-habits",
+  "path_key": "daily-habits",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

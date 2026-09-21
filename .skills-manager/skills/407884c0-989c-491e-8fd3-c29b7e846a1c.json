@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "407884c0-989c-491e-8fd3-c29b7e846a1c",
+  "path": "cardio-training",
+  "path_key": "cardio-training",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "local",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

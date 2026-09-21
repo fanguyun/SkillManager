@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "25083cb1-bd68-407a-8b47-68b6decdc891",
+  "path": "rp-training",
+  "path_key": "rp-training",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "borisghidaglia/science-based-lifter/rp-training",
+    "subpath": "skills/rp-training",
+    "branch": null
+  }
+}

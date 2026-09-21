@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "15b92411-82c6-4935-8171-5605f075abb2",
+  "path": "rp-diet",
+  "path_key": "rp-diet",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "borisghidaglia/science-based-lifter/rp-diet",
+    "subpath": "skills/rp-diet",
+    "branch": null
+  }
+}

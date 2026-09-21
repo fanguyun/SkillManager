@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c9e1cca7-e546-49e9-bda0-492f15c82b32",
+  "path": "program-creation",
+  "path_key": "program-creation",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "borisghidaglia/science-based-lifter/program-creation",
+    "subpath": "skills/program-creation",
+    "branch": null
+  }
+}
