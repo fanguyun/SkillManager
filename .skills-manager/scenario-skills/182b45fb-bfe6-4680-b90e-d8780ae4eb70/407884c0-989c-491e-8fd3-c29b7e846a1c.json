@@ -8,10 +8,14 @@
     "cline": true,
     "codex": true,
     "cursor": true,
+    "deepseek_harness": true,
+    "gemini_cli": true,
     "github_copilot": true,
     "openclaw": true,
+    "opencode": true,
     "qclaw": true,
     "trae": true,
-    "warp": true
+    "warp": true,
+    "workbuddy": true
   }
 }
