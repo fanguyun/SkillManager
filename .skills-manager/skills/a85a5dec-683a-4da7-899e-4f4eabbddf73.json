@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a85a5dec-683a-4da7-899e-4f4eabbddf73",
+  "path": "juyouci",
+  "path_key": "juyouci",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "chase-qisiai/juyouci/juyouci",
+    "subpath": null,
+    "branch": null
+  }
+}
