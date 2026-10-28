@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "beaff616-34d0-4088-b2a6-efda9847db43",
+  "path": "scientific-writing",
+  "path_key": "scientific-writing",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "k-dense-ai/scientific-agent-skills/scientific-writing",
+    "subpath": "skills/scientific-writing",
+    "branch": null
+  }
+}

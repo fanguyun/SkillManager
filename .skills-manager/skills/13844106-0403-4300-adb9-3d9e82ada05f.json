@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "13844106-0403-4300-adb9-3d9e82ada05f",
+  "path": "content-research-writer",
+  "path_key": "content-research-writer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "composiohq/awesome-claude-skills/content-research-writer",
+    "subpath": "content-research-writer",
+    "branch": null
+  }
+}

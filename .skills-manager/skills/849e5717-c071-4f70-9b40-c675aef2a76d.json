@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "849e5717-c071-4f70-9b40-c675aef2a76d",
+  "path": "marketing-psychology",
+  "path_key": "marketing-psychology",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "coreyhaines31/marketingskills/marketing-psychology",
+    "subpath": "skills/marketing-psychology",
+    "branch": null
+  }
+}

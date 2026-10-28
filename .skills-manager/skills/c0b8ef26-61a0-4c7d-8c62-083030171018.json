@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c0b8ef26-61a0-4c7d-8c62-083030171018",
+  "path": "last30days",
+  "path_key": "last30days",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "mvanhorn/last30days-skill/last30days",
+    "subpath": "skills/last30days",
+    "branch": null
+  }
+}
