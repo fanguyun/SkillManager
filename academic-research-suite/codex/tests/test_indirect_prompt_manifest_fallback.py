@@ -10,7 +10,7 @@ import pytest
 
 SUITE_ROOT = Path(__file__).resolve().parents[2]
 RUNNER_PATH = SUITE_ROOT / "ars" / "scripts" / "run_indirect_prompt_injection_no_call.py"
-VALID_COMMIT = "4c5449017f46eb64d112a301d4817d22c7c9f3d9"
+VALID_COMMIT = "b34c63f828b3535f403079a4f42bc7955da2f64b"
 
 
 def _load_runner():
