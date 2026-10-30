@@ -1,0 +1,7 @@
+interface:
+  display_name: "一刻相册原图导出"
+  short_description: "批量导出百度一刻相册的原图与原视频，带 MD5 校验和断点续传"
+  default_prompt: "使用 $yike-photo-export 把我一刻相册里的照片和视频以原图导出到本地，先检查 Cookie 有效性并统计总量，再小批量试跑确认无误后全量下载，最后校验完整性。"
+
+policy:
+  allow_implicit_invocation: true

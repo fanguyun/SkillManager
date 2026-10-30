@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "cf3bd7d4-be80-4e44-9f11-a748fb03991e",
+  "path": "how-to-live-better",
+  "path_key": "how-to-live-better",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "how-to-live-better",
+    "branch": null
+  }
+}

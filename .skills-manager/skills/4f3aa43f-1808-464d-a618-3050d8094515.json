@@ -11,6 +11,6 @@
     "type": "git",
     "ref": "https://github.com/fanguyun/ai-skills.git",
     "subpath": "gen-i18n",
-    "branch": "main"
+    "branch": null
   }
 }

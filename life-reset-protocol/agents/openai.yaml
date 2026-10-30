@@ -1,0 +1,7 @@
+interface:
+  display_name: "人生重置协议"
+  short_description: "一天重启：先挖反愿景，再定时打断，最后收成愿景、1 年镜头与每日杠杆"
+  default_prompt: "使用 $life-reset-protocol 主持一次人生重置：先做反愿景和愿景的心理挖掘，再用日间打断抓隐藏目标，最后收成游戏面板。不要替我想答案。"
+
+policy:
+  allow_implicit_invocation: true

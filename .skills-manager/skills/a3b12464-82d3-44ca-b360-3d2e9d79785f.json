@@ -11,6 +11,6 @@
     "type": "git",
     "ref": "https://github.com/fanguyun/ai-skills.git",
     "subpath": "project-security-scan",
-    "branch": "main"
+    "branch": null
   }
 }
