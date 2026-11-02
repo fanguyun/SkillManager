@@ -1,7 +1,7 @@
 ---
 name: patent-disclosure-skill
-description: "中国专利技能：挖掘专利点并撰写发明/实用新型/外观设计交底书；将已有交底改写为申请文件四件套；依据发明人材料衔接交底与申请；按著录项目检索公布公告；解读专利文献；基于已入库解读生成专利地图；对照审查政策撰写简报；辅助审查意见答复；编制权利要求对照表底稿（不构成法律意见）。| China patents: mine patent points and draft invention/utility-model/design disclosures; convert an existing disclosure into application documents; sequence disclosure and application from inventor materials; search CNIPA bibliographic records; interpret patent documents; generate a patent map from an interpreted vault; prepare examination-policy briefs; assist office-action responses; and prepare claim-chart worksheets (not legal opinions)."
-version: "5.1.0"
+description: "中国专利技能：挖掘专利点并撰写发明/实用新型/外观设计交底书；将已有交底改写为申请文件四件套；依据发明人材料衔接交底与申请；按著录项目检索公布公告，点名海外时检索美欧日韩等海外专利；解读中国及海外专利文献；基于已入库解读生成专利地图；对照审查政策撰写简报；辅助审查意见答复；编制权利要求对照表底稿（不构成法律意见）。| China patents: mine patent points and draft invention/utility-model/design disclosures; convert an existing disclosure into application documents; sequence disclosure and application from inventor materials; search CNIPA bibliographic records, and overseas patents via Google Patents on request; interpret Chinese and overseas patent documents; generate a patent map from an interpreted vault; prepare examination-policy briefs; assist office-action responses; and prepare claim-chart worksheets (not legal opinions)."
+version: "5.2.0"
 user-invocable: true
 argument-hint: "[可选：项目路径 / 交底书 / 申请底稿 / 交底申请一起做 / 专利检索 / 专利号或 PDF / 专利地图 / 专利围栏 / 政策简报 / 审查答复 / 对照表]"
 allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, Bash
@@ -18,8 +18,8 @@ allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, Bash
 | **交底** | 挖专利点 → 查新 → 成稿 → 迭代（发明 / 实用新型 / 外观）；首篇定稿后可做保护型 1+N 专利布局 | `skills/patent-disclosure/SKILL.md` |
 | **申请文件** | 已有交底 → 权要 / 说明书 / 摘要 / 附图 | `skills/patent-application/SKILL.md` |
 | **案卷** | 按发明人/工程师给的材料一趟写出交底书和申请文件 | `skills/patent-docket/SKILL.md` |
-| **检索** | 公布站高级查询（发明人/申请人/分类号/名称/摘要等）；单图或权要可先抽关键字再查 | `skills/patent-search/SKILL.md` |
-| **解读** | 公开号 / PDF / 全文 → 通俗笔记 + 图谱 | `skills/patent-reader/SKILL.md` |
+| **检索** | 公布站高级查询（发明人/申请人/分类号/名称/摘要等）；单图或权要可先抽关键字再查；点名海外时用 Google Patents 查美欧日韩等 | `skills/patent-search/SKILL.md` |
+| **解读** | 公开号（中国或海外）/ PDF / 全文 → 通俗笔记 + 图谱 | `skills/patent-reader/SKILL.md` |
 | **对照表** | 独权特征 vs 对比文件 / 产品 / 标准，逐格证据与强弱（须点名；底稿，非法律意见） | `skills/patent-chart/SKILL.md` |
 | **专利地图** | 已解读入库的案例摊成五种图（语义地形） | `skills/patent-map/SKILL.md` |
 | **审查答复** | 审查意见问答与草稿；库薄时引导案例入库 | `skills/patent-oa/SKILL.md` |
@@ -36,7 +36,8 @@ allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, Bash
 | 申请文件、申请底稿、申报材料；`/申请底稿`、`/patent-apply` — **须点名** | **须指定交底目录**；缺 schema / 线稿 / 交底书则停，引导先补交底 | 申请文件包 | — |
 | 交底申请一起做、从零出交底和申请、一条龙、帮写交底再出申请、按清单改、会稿、案卷；`/patent-docket` — **须点名** | 状态写 `outputs/docket/`；清单缺口最多来回三轮，缺事实问人、不编 | 案卷包（再由它 `Read` 交底或申请入口） | 只写交底，或只出四件套时，不进案卷 |
 | 按著录字段查公布公告、个人公开清单、以图或权要生成检索式；`/patent-search` | 无 | 检索包 | 结果不写成交底查新 |
-| 读专利、给出公开号或 PDF 且目标是「读懂」；`/patent-read`、`/读专利` | 无 | 解读包（**优先**） | 不跑交底成文，不自动进对照表 |
+| 海外检索、查美国 / 欧洲 / 日本 / 韩国专利、PCT 检索、「包含某国」— **须点名** | 没提国家时走公布站 | 检索包海外旁路 | 不进交底查新；限流即停，不重试 |
+| 读专利、给出公开号（含海外号）或 PDF 且目标是「读懂」；`/patent-read`、`/读专利` | 无 | 解读包（**优先**） | 不跑交底成文，不自动进对照表；海外号不顺带做海外检索 |
 | 对照表、claim chart、无效对照、FTO 初筛、侵权对照；`/patent-chart` — **须点名** | 左列须有公开号 / PDF / 权要 / `claim_features.json` / 交底 5.1；缺特征清单则派解读包 | 对照表包 | 不出法律意见 |
 | 专利地图、案例地图；`/专利地图`、`/patent-map` — **须点名** | 需已有解读入库的 vault | 专利地图包 | 不因读专利或写交底进入 |
 | 审查意见、OA、案例入库；`/oa` — **须点名** | 库薄时先引导入库 | 审查答复包 | — |
@@ -52,7 +53,7 @@ allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, Bash
 
 ## 能力自述（用户问「你能做什么 / 还能做什么」时）
 
-按**能力总览**复述 9 项，每项一句并给出触发说法；说明**申请文件 / 案卷 / 专利地图 / 审查答复 / 政策简报 / 对照表须点名**才会进入。本节只用能力总览，不用交底的「交付后请确认」。
+按**能力总览**复述 9 项，每项一句并给出触发说法；说明**申请文件 / 案卷 / 专利地图 / 审查答复 / 政策简报 / 对照表 / 海外检索须点名**才会进入。本节只用能力总览，不用交底的「交付后请确认」。
 
 ## 目录
 
