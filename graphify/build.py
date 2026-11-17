@@ -1489,7 +1489,10 @@ def graph_has_legacy_ids(nodes: list, root: str | Path | None = None, sample: in
     derived, since ids never include it. Without it a fresh subfolder build reads
     as legacy: ``sub/pkg/mod.py`` wants ``sub_pkg_mod``, and the real ``pkg_mod``
     looks exactly like the old one-parent form."""
-    from graphify.extractors.base import _file_stem
+    # From graphify.ids, not graphify.extractors.base: importing anything under
+    # graphify.extractors loads every language extractor, which `query` and the
+    # MCP server would pay on each start just for this function.
+    from graphify.ids import _file_stem
     _r = str(root) if root is not None else None
     _pfx = (source_prefix.replace("\\", "/").rstrip("/") + "/") if source_prefix else None
     checked = 0
@@ -2613,6 +2616,18 @@ def _tier_replacement_sources(
             if norm:
                 new_sem_sources.add(norm)
 
+    # Failure metadata overrides dispatch provenance, including an explicit
+    # ast_sources argument from a caller using the older extraction contract.
+    # Match identity as well as spelling so relative/absolute paths agree.
+    failure_root = str(root) if root is not None else None
+    failed_ast = {
+        _abs_identity(str(sf), failure_root)
+        for ch in chunks if isinstance(ch, dict)
+        for sf in (ch.get("failed_sources") or []) if sf
+    }
+    new_ast_sources = {
+        sf for sf in new_ast_sources if _abs_identity(sf, failure_root) not in failed_ast
+    }
     return new_ast_sources, new_sem_sources
 
 
