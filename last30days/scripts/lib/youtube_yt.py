@@ -48,18 +48,35 @@ TRANSCRIPT_LIMITS = {
 # quality_nudge reads these via last30days.py to suppress the stale-yt-dlp
 # nudge when every attempted fetch actually succeeded. yt-dlp path only: the
 # nudge diagnoses the local binary, not the ScrapeCreators API.
-_TRANSCRIPT_FETCH_STATS = {"attempts": 0, "failures": 0}
+#
+# ``target`` sums each search's transcript target, so health is measured
+# against what the run tried to get rather than every surviving video.
+# ``blocked`` counts searches whose yt-dlp hit a YouTube bot check or rate
+# limit, and ``sc_rescued`` counts transcripts the ScrapeCreators fallback
+# fetched instead: those failures are the network, not a stale binary.
+_TRANSCRIPT_FETCH_STATS = {
+    "attempts": 0, "failures": 0, "target": 0, "blocked": 0, "sc_rescued": 0,
+}
+_TRANSCRIPT_FETCH_STATS_LOCK = threading.Lock()
 
 
 def get_transcript_fetch_stats() -> Dict[str, int]:
     """Return cumulative transcript-fetch stats for this process."""
-    return dict(_TRANSCRIPT_FETCH_STATS)
+    with _TRANSCRIPT_FETCH_STATS_LOCK:
+        return dict(_TRANSCRIPT_FETCH_STATS)
 
 
 def reset_transcript_fetch_stats() -> None:
     """Reset cumulative transcript-fetch stats (used by tests)."""
-    _TRANSCRIPT_FETCH_STATS["attempts"] = 0
-    _TRANSCRIPT_FETCH_STATS["failures"] = 0
+    with _TRANSCRIPT_FETCH_STATS_LOCK:
+        for key in _TRANSCRIPT_FETCH_STATS:
+            _TRANSCRIPT_FETCH_STATS[key] = 0
+
+
+def _add_transcript_fetch_stats(**counts: int) -> None:
+    with _TRANSCRIPT_FETCH_STATS_LOCK:
+        for key, value in counts.items():
+            _TRANSCRIPT_FETCH_STATS[key] += value
 
 # Max words to keep from each transcript
 TRANSCRIPT_MAX_WORDS = 5000
@@ -111,8 +128,13 @@ _NO_CAPTION_RE = re.compile(
 )
 
 
-def extract_transcript_highlights(transcript: str, topic: str, limit: int = 5) -> list[str]:
+def extract_transcript_highlights(
+    transcript: str, topic: str, limit: int = 5, *, max_words: int = 50,
+) -> list[str]:
     """Extract quotable highlights from a YouTube transcript.
+
+    ``max_words`` bounds a sentence; short-form spoken captions run long
+    sentences together, so their callers pass a higher bound.
 
     Filters filler (subscribe, welcome back, etc.), scores sentences by
     specificity (numbers, proper nouns, topic relevance), and returns
@@ -124,8 +146,8 @@ def extract_transcript_highlights(transcript: str, topic: str, limit: int = 5) -
     sentences = re.split(r'(?<=[.!?])\s+', transcript)
 
     # Fallback for punctuation-free transcripts (common with auto-captions):
-    # chunk into ~20-word segments so they pass the 8-50 word filter.
-    if len(sentences) <= 1 and len(transcript.split()) > 50:
+    # chunk into ~20-word segments so they pass the 8-to-max_words filter.
+    if len(sentences) <= 1 and len(transcript.split()) > max_words:
         words = transcript.split()
         sentences = [' '.join(words[i:i+20]) for i in range(0, len(words), 20)]
 
@@ -142,7 +164,7 @@ def extract_transcript_highlights(transcript: str, topic: str, limit: int = 5) -
     for sent in sentences:
         sent = sent.strip()
         words = sent.split()
-        if len(words) < 8 or len(words) > 50:
+        if len(words) < 8 or len(words) > max_words:
             continue
         if any(re.search(p, sent, re.IGNORECASE) for p in filler):
             continue
@@ -1736,6 +1758,7 @@ def _fetch_transcripts_parallel(
     # Surface the split so the summary can't misrepresent a masked failure
     # as a clean success.
     sc_rescued = sum(1 for st in statuses.values() if st.get("sc_rescued"))
+    _add_transcript_fetch_stats(sc_rescued=sc_rescued)
     if sc_rescued:
         _log(f"Got transcripts for {got}/{len(video_ids)} videos "
              f"({errors} failed, {sc_rescued} rescued via ScrapeCreators fallback)")
@@ -1778,12 +1801,17 @@ def backfill_transcripts(
         return
     _log(f"Backfilling transcripts for {len(attempts)} finalized videos (target: {need})")
     captions_disabled: Set[str] = set()
-    transcripts = fetch_transcripts_parallel(
-        [it.item_id for it in attempts],
-        out_captions_disabled=captions_disabled,
-        token=token,
-        max_sc_rescues=need,
-    )
+    with _youtube_block_scope() as block:
+        transcripts = fetch_transcripts_parallel(
+            [it.item_id for it in attempts],
+            out_captions_disabled=captions_disabled,
+            token=token,
+            max_sc_rescues=need,
+        )
+    # A bot check here is a network loss like one in the search pass, so the
+    # footer gives the bot-check advice rather than "upgrade yt-dlp".
+    if block.tripped:
+        _add_transcript_fetch_stats(blocked=1)
     for it in attempts:
         if it.item_id in captions_disabled:
             it.metadata["captions_disabled"] = True
@@ -1943,10 +1971,14 @@ def _search_and_transcribe(
         # and unfinished ones never ran to an answer, so neither counts as a
         # failure) for the stale-yt-dlp nudge.
         finished_ids = [vid for vid in candidate_ids if vid not in unfinished_ids]
-        _TRANSCRIPT_FETCH_STATS["attempts"] += len(finished_ids)
-        _TRANSCRIPT_FETCH_STATS["failures"] += sum(
-            1 for vid in finished_ids
-            if not transcripts.get(vid) and vid not in captions_disabled_ids
+        _add_transcript_fetch_stats(
+            attempts=len(finished_ids),
+            failures=sum(
+                1 for vid in finished_ids
+                if not transcripts.get(vid) and vid not in captions_disabled_ids
+            ),
+            target=transcript_limit,
+            blocked=int(_youtube_transcripts_blocked()),
         )
     else:
         _log(f"Transcript limit is 0 for depth={depth}, skipping transcript fetch")
@@ -2115,17 +2147,27 @@ def _ytdlp_comments_result(
         _log(f"yt-dlp comment JSON parse failed for {video_id}: {exc}")
         return [], False
 
+    channel_id = str(payload.get("channel_id") or "")
     comments = []
     for c in (payload.get("comments") or [])[:max_comments]:
         text = c.get("text") or ""
         if not text:
             continue
-        comments.append({
+        comment = {
             "author": c.get("author") or "",
             "text": text[:400],
             "likes": c.get("like_count") or 0,
             "date": c.get("_time_text") or "",
-        })
+        }
+        # Whether the channel itself wrote this. A channel's display name and
+        # the handle on its comments can differ, so the name cannot say: yt-dlp
+        # does (author_is_uploader), and failing that the channel ids do. The
+        # key is left out when neither is known.
+        if isinstance(c.get("author_is_uploader"), bool):
+            comment["is_uploader"] = c["author_is_uploader"]
+        elif channel_id and c.get("author_id"):
+            comment["is_uploader"] = str(c["author_id"]) == channel_id
+        comments.append(comment)
     return comments, True
 
 
@@ -2194,6 +2236,7 @@ def _fetch_video_comments(
 
         # SC returns author as {"name": "@handle", ...}; legacy mocks may pass a string.
         author = c.get("author") or c.get("author_name", "")
+        is_uploader = _sc_comment_is_uploader(c)
         if isinstance(author, dict):
             author = author.get("name") or author.get("handle") or ""
 
@@ -2212,14 +2255,36 @@ def _fetch_video_comments(
             or c.get("publishedTimeText", "")
         )
 
-        comments.append({
+        comment = {
             "author": author,
             "text": text[:400],
             "likes": likes,
             "date": date,
-        })
+        }
+        if is_uploader is not None:
+            comment["is_uploader"] = is_uploader
+        comments.append(comment)
 
     return comments
+
+
+# Keys under which a comment payload may say its author is the video's
+# channel. Read from the comment and from its author object; a payload with
+# none of them leaves the comment's authorship unknown.
+_SC_UPLOADER_FLAG_KEYS = (
+    "author_is_uploader", "authorIsChannelOwner", "isChannelOwner", "isCreator",
+    "is_creator",
+)
+
+
+def _sc_comment_is_uploader(comment: Dict[str, Any]) -> Optional[bool]:
+    """The channel-owner flag a ScrapeCreators comment carries, or None."""
+    author = comment.get("author")
+    for holder in (comment, author if isinstance(author, dict) else {}):
+        for key in _SC_UPLOADER_FLAG_KEYS:
+            if isinstance(holder.get(key), bool):
+                return holder[key]
+    return None
 
 
 def search_youtube_sc(
@@ -2272,14 +2337,22 @@ def search_youtube_sc(
             raw.get("id") or raw.get("video_id") or raw.get("videoId") or ""
         )
         title = raw.get("title", "")
+        # SC's /v1/youtube/search returns camelCase fields (viewCountInt,
+        # publishedTime, lengthSeconds) and `channel` as an object; the
+        # snake_case names stay as fallbacks.
         channel = raw.get("channel") or raw.get("channel_name") or raw.get("uploader", "")
+        if isinstance(channel, dict):
+            channel = channel.get("title") or channel.get("handle") or ""
         description = str(raw.get("description", ""))[:500]
-        view_count = raw.get("view_count") or raw.get("views", 0)
+        view_count = raw.get("view_count") or raw.get("viewCountInt") or raw.get("views", 0)
         like_count = raw.get("like_count") or raw.get("likes", 0)
         comment_count = raw.get("comment_count") or raw.get("comments", 0)
 
         # Date: try multiple field names
-        date_str = raw.get("upload_date") or raw.get("date") or raw.get("published_at", "")
+        date_str = (
+            raw.get("upload_date") or raw.get("date") or raw.get("published_at")
+            or raw.get("publishedTime") or ""
+        )
         if date_str and len(date_str) == 8 and date_str.isdigit():
             date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
         elif date_str and "T" in date_str:
@@ -2300,7 +2373,7 @@ def search_youtube_sc(
                 "likes": like_count or 0,
                 "comments": comment_count or 0,
             },
-            "duration": raw.get("duration"),
+            "duration": raw.get("duration") or raw.get("lengthSeconds"),
             "relevance": _compute_relevance(core_topic, f"{title} {description}"),
             "why_relevant": f"YouTube: {title[:60]}" if title else f"YouTube: {core_topic}",
             "description": description,

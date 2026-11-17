@@ -13,16 +13,27 @@ import re
 from collections import Counter
 from typing import Any
 
-from . import hiring_signals
-
-# A sentence found under this many distinct titles of a board is company or
-# role-family text, not something one role says. Counting a title in a
-# department once (however many cities or postings carry it) makes one fixed
-# number work for a three-role board and a 2,900-role one; below three nothing
-# is removed.
-BOILERPLATE_MIN_ROLES = 3
+from . import hiring_signals, jobs_teams
+from .job_boilerplate import BOILERPLATE_MIN_ROLES  # noqa: F401 (re-exported)
+from .job_boilerplate import key as _key
+from .job_boilerplate import role_sentences, shared_sentence_counts
 # Roles in the digest, and role-unique characters kept for each.
 DIGEST_MAX_ROLES = 40
+# Of those, how many may go to roles the run itself ranked highest (its ranked
+# job postings and the roles its hiring themes name) when the rarity pick left
+# them out. The rest stay with the rarest roles.
+ENGINE_ROLE_SLOTS = 10
+# Of the rest, how many go first to roles matching the run's story terms,
+# shared evenly by the terms that matched (at least two each).
+STORY_ROLE_SLOTS = 8
+STORY_TERM_MIN_SLOTS = 2
+# On a board with more open roles than this, a place or a title word only one
+# role has is common enough to say nothing, and earns no score.
+RARITY_MAX_OPEN_ROLES = 500
+# A title tail shared by this many roles, on a large board, is a team cluster;
+# the upper bound grows to 1% of the board.
+CLUSTER_MIN_ROLES = 3
+CLUSTER_MAX_ROLES = 20
 DIGEST_ROLE_CHARS = 600
 # Ceiling for the whole rendered digest section: room for every role at its
 # full text plus about 300 characters of title, department, location and URL.
@@ -30,26 +41,16 @@ DIGEST_MAX_CHARS = 36_000
 # Locations named on one entry before the rest are counted.
 DIGEST_ENTRY_LOCATIONS = 3
 
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
+def unreadable_job_site_line(name: str) -> str:
+    """What the run says about a company's job site it knows and cannot read."""
+    return f"{name}'s job site can't be read automatically"
+
+
 _TITLE_TERM = re.compile(r"[a-z][a-z0-9+#-]{2,}")
-
-
-def _key(text: str) -> str:
-    return " ".join(str(text or "").lower().split())
 
 
 def _text(item: dict[str, Any]) -> str:
     return str(item.get("description_blocks") or item.get("description") or "")
-
-
-def _sentences(text: str) -> list[str]:
-    out: list[str] = []
-    for line in text.splitlines():
-        for sentence in _SENTENCE_END.split(line):
-            sentence = " ".join(sentence.split())
-            if sentence:
-                out.append(sentence)
-    return out
 
 
 def _group(item: dict[str, Any]) -> tuple[str, str]:
@@ -85,9 +86,14 @@ def distinct_roles(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not _key(item.get("title")):
             continue
         role = roles.setdefault(_role_key(item), {"item": item, "locations": [], "urls": []})
-        location = str(item.get("location") or "").strip()
-        if location and location not in role["locations"]:
-            role["locations"].append(location)
+        if item.get("story_term") and not role.get("story_term"):
+            role["story_term"] = str(item["story_term"])
+            role["story_rank"] = item.get("story_rank")
+        # A row a reader already merged across locations names them all itself.
+        for place in item.get("locations") or [item.get("location")]:
+            location = str(place or "").strip()
+            if location and location not in role["locations"]:
+                role["locations"].append(location)
         url = str(item.get("url") or "").strip()
         if url and url not in role["urls"]:
             role["urls"].append(url)
@@ -96,37 +102,80 @@ def distinct_roles(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def select_roles(
     items: list[dict[str, Any]], *, limit: int = DIGEST_MAX_ROLES,
+    open_roles: int | None = None, teams: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Pick the roles that are rarest on this board, at most ``limit``.
+    """Pick the story roles, the named-team roles, then the roles rarest on
+    this board, at most ``limit``.
 
-    A role scores for sitting in a department no other role is in, for a
+    Roles a story term matched (``story_term``) come first, up to
+    ``STORY_ROLE_SLOTS`` of them; see ``_story_picks``. Then, from ``teams``
+    (``jobs_teams.named_teams``), the leads of teams no other title names
+    (tagged ``team_lead``) and each top team's newest role (tagged ``team``),
+    up to ``jobs_teams.LEAD_ROLE_SLOTS`` and ``jobs_teams.TEAM_ROLE_SLOTS``.
+    The rest are scored:
+    a role scores for sitting in a department no other role is in, for a
     location no other row names, for a title word no other role uses, and for
-    a founding, leadership or specialized title. Ties go to the newest role
-    with a true posted date, then to board order. Two postings with one title
-    in one department count once toward how common that title's department
-    and words are.
+    a founding, leadership or specialized title. On a board of more than
+    ``RARITY_MAX_OPEN_ROLES`` open roles (``open_roles``, else the rows
+    given) the location and title word earn nothing. Ties go to the newest
+    role with a true posted date, then to board order. Two postings with one
+    title in one department count once toward how common that title's
+    department and words are.
     """
     roles = distinct_roles(items)
+    rarity = (len(items) if open_roles is None else open_roles) <= RARITY_MAX_OPEN_ROLES
     groups = {_group(role["item"]) for role in roles}
     departments = Counter(department for _title, department in groups if department)
-    locations = Counter(_key(item.get("location")) for item in items if _key(item.get("location")))
+    # Counted from the same places a role is shown with, so a place that is
+    # one role's first and several others' extra is not taken for rare.
+    locations = Counter(
+        _key(place) for item in items
+        for place in item.get("locations") or [item.get("location")] if _key(place)
+    )
     terms = Counter(
         term for title in {title for title, _department in groups}
         for term in set(_TITLE_TERM.findall(title))
     )
 
-    def score(role: dict[str, Any]) -> int:
+    places = {
+        hiring_signals.place_key(place) for item in items
+        for place in item.get("locations") or [item.get("location")] if _key(place)
+    }
+
+    # On a board too large for one-offs to mean anything, a small team named
+    # in several titles ("..., Air Manufacturing Innovation") is the signal.
+    tails = Counter() if rarity else Counter(
+        tail.lower() for tail in (
+            hiring_signals._specialization(title, places=places)
+            for title in {title for title, _department in groups}
+        ) if tail
+    )
+    cluster_max = max(CLUSTER_MAX_ROLES, (open_roles or len(items)) // 100)
+
+    def clustered(item: dict[str, Any]) -> bool:
+        tail = hiring_signals._specialization(str(item.get("title") or ""), places=places)
+        return bool(tail) and CLUSTER_MIN_ROLES <= tails[tail.lower()] <= cluster_max
+
+    def board_size_score(role: dict[str, Any]) -> int:
         item = role["item"]
-        department = departments.get(_key(item.get("department")), 0)
-        flags = hiring_signals._title_flags(str(item.get("title") or ""))
+        if not rarity:
+            return 3 * clustered(item)
         return (
-            3 * (department == 1)
-            + 1 * (department == 2)
-            + 3 * any(locations[_key(location)] == 1 for location in role["locations"])
+            3 * any(locations[_key(location)] == 1 for location in role["locations"])
             + 2 * any(
                 terms[term] == 1
                 for term in _TITLE_TERM.findall(_key(item.get("title")))
             )
+        )
+
+    def score(role: dict[str, Any]) -> int:
+        item = role["item"]
+        department = departments.get(_key(item.get("department")), 0)
+        flags = hiring_signals._title_flags(str(item.get("title") or ""), places=places)
+        return (
+            3 * (department == 1)
+            + 1 * (department == 2)
+            + board_size_score(role)
             + 4 * ("founding" in flags)
             + 2 * ("leadership" in flags)
             + 1 * ("specialized" in flags)
@@ -136,11 +185,150 @@ def select_roles(
         item = role["item"]
         return str(item.get("date") or "") if item.get("posted_date_true") else ""
 
+    story = _story_picks(roles, min(limit, STORY_ROLE_SLOTS))
+    taken = set(story)
+    named = _team_picks(roles, teams, taken)
+    taken.update(named)
     order = sorted(
-        range(len(roles)),
+        (index for index in range(len(roles)) if index not in taken),
         key=lambda index: (-score(roles[index]), _reverse(posted(roles[index])), index),
     )
-    return [roles[index] for index in order[:limit]]
+    return [roles[index] for index in [*story, *named, *order][:limit]]
+
+
+def _team_picks(
+    roles: list[dict[str, Any]], teams: dict[str, Any] | None, taken: set[int],
+) -> list[int]:
+    """Indexes of the named-team leads, then each top team's newest role,
+    tagging each role with what it stands for. A role already taken (a story
+    match) keeps its slot and is not counted twice."""
+    if not teams:
+        return []
+    where = {_role_key(role["item"]): index for index, role in enumerate(roles)}
+    picks: list[int] = []
+
+    def take(row: dict[str, Any], tag: str, value: Any, slots: int, used: list[int]) -> None:
+        index = where.get(_role_key(row)) if _key(row.get("title")) else None
+        if index is None or index in taken or index in picks or len(used) >= slots:
+            return
+        roles[index][tag] = value
+        picks.append(index)
+        used.append(index)
+
+    leads: list[int] = []
+    for row in teams.get("lead_items") or []:
+        take(row, "team_lead", True, jobs_teams.LEAD_ROLE_SLOTS, leads)
+    members: list[int] = []
+    for team, row in zip(teams.get("teams") or [], teams.get("team_items") or []):
+        take(row, "team", {"name": team["name"], "roles": team["roles"]}, jobs_teams.TEAM_ROLE_SLOTS, members)
+    return picks
+
+
+def _story_picks(roles: list[dict[str, Any]], slots: int) -> list[int]:
+    """Indexes of the story roles that take the reserved slots.
+
+    The slots are shared evenly by the terms that matched a role, at least
+    ``STORY_TERM_MIN_SLOTS`` each, in the order the terms first matched. Each
+    term's roles go in the order the board's search returned them
+    (``story_rank``), else board order. A term with fewer roles than its
+    share passes the unused slots on to the terms that have more.
+    """
+    queues: dict[str, list[int]] = {}
+    ranked = sorted(
+        (index for index, role in enumerate(roles) if role.get("story_term")),
+        key=lambda index: (
+            roles[index].get("story_rank") is None, roles[index].get("story_rank") or 0, index,
+        ),
+    )
+    for index in ranked:
+        queues.setdefault(roles[index]["story_term"], []).append(index)
+    if not queues or slots <= 0:
+        return []
+    share = max(STORY_TERM_MIN_SLOTS, slots // len(queues))
+    counts: dict[str, int] = {}
+    left = slots
+    for term, queue in queues.items():
+        counts[term] = min(share, len(queue), left)
+        left -= counts[term]
+    # Unused shares, one slot at a time to each term with roles left.
+    while left > 0 and any(counts[term] < len(queue) for term, queue in queues.items()):
+        for term, queue in queues.items():
+            if left > 0 and counts[term] < len(queue):
+                counts[term] += 1
+                left -= 1
+    return [index for term, queue in queues.items() for index in queue[:counts[term]]]
+
+
+def add_engine_roles(
+    digest: dict[str, Any],
+    items: list[dict[str, Any]],
+    urls: list[str],
+    *,
+    slots: int = ENGINE_ROLE_SLOTS,
+    limit: int = DIGEST_MAX_ROLES,
+) -> dict[str, Any]:
+    """Return ``digest`` with the roles the run ranked highest kept in it.
+
+    ``urls`` are posting URLs in the run's own order of importance and
+    ``items`` the board rows the digest was built from. The first ``slots``
+    ranked roles on the board are reserved a place: one the digest already
+    lists is marked ``engine`` where it stands, and the others are added at
+    the front with their role-unique text. The places they need are given up
+    by the rarity picks that are not reserved, rarest kept longest, so the
+    digest never holds more than ``limit`` roles and never loses a reserved
+    one. A ranked role past the reserved places is left as it is, and a URL
+    that is not on the board is passed over. An added role the board gave no
+    text for is counted in ``note``.
+    """
+    entries = [dict(entry) for entry in digest.get("roles") or []]
+    listed = {
+        url: entry
+        for entry in entries
+        for url in (entry.get("url"), *(entry.get("urls") or [])) if url
+    }
+    by_url = {url: role for role in distinct_roles(items) for url in role["urls"]}
+    picked: list[dict[str, Any]] = []
+    reserved = 0
+    for url in urls:
+        if reserved >= slots:
+            break
+        if url in listed:
+            if not listed[url].get("engine"):
+                listed[url]["engine"] = True
+                reserved += 1
+            continue
+        role = by_url.get(url)
+        if role is None or any(role is chosen for chosen in picked):
+            continue
+        picked.append(role)
+        reserved += 1
+    added = build_digest(items, picked)["roles"] if picked else []
+    for entry in added:
+        entry["engine"] = True
+    # The unreserved rarity picks give up places from their end.
+    spare = max(0, limit - len(added) - sum(1 for entry in entries if entry.get("engine")))
+    kept = []
+    for entry in entries:
+        if entry.get("engine"):
+            kept.append(entry)
+        elif spare > 0:
+            kept.append(entry)
+            spare -= 1
+    out = {
+        **digest,
+        "roles": [*added, *kept][:limit],
+        "engine_roles": reserved,
+    }
+    # A board that gives a role's text one call at a time (Workday) was asked
+    # only for the rarity picks, before anything was ranked.
+    bare = sum(1 for entry in added if not entry["text"])
+    if bare:
+        note = (
+            f"{bare} of the ranked roles listed first have no role text "
+            "(this board gives it one call per role, made before ranking)"
+        )
+        out["note"] = f"{digest['note']}; {note}" if digest.get("note") else note
+    return out
 
 
 def _reverse(date: str) -> tuple[int, ...]:
@@ -158,22 +346,16 @@ def build_digest(
     titles share, cut to ``DIGEST_ROLE_CHARS``.
     """
     roles = distinct_roles(items)
-    by_group: dict[tuple[str, str], set[str]] = {}
-    for role in roles:
-        by_group.setdefault(_group(role["item"]), set()).update(
-            _key(sentence) for sentence in _sentences(_text(role["item"]))
-        )
-    shared: Counter[str] = Counter()
-    for sentences in by_group.values():
-        shared.update(sentences)
+    shared = shared_sentence_counts(
+        (str(role["item"].get("title") or ""), str(role["item"].get("department") or ""),
+         _text(role["item"]))
+        for role in roles
+    )
 
     entries: list[dict[str, Any]] = []
     for role in selected:
         item = role["item"]
-        unique = " ".join(
-            sentence for sentence in _sentences(_text(item))
-            if shared[_key(sentence)] < BOILERPLATE_MIN_ROLES
-        )
+        unique = " ".join(role_sentences(_text(item), shared))
         if len(unique) > DIGEST_ROLE_CHARS:
             unique = unique[: DIGEST_ROLE_CHARS - 3].rstrip() + "..."
         named = role["locations"][:DIGEST_ENTRY_LOCATIONS]
@@ -188,4 +370,7 @@ def build_digest(
             "urls": list(role.get("urls") or []),
             "text": unique,
         })
+        for tag in ("story_term", "team", "team_lead"):
+            if role.get(tag):
+                entries[-1][tag] = role[tag]
     return {"distinct_roles": len(roles), "roles": entries}

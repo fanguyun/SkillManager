@@ -429,8 +429,12 @@ def _resolve_model_pins(config: dict[str, Any], depth: str, provider_name: str) 
     rerank_model = config.get("LAST30DAYS_RERANK_MODEL") or default_rerank
 
     if provider_name == "gemini":
-        _require_gemini_31(planner_model, role="planner")
-        _require_gemini_31(rerank_model, role="rerank")
+        if not _is_gemini_31_or_newer(planner_model):
+            _warn_stale_gemini_pin(planner_model, default_planner, role="planner")
+            planner_model = default_planner
+        if not _is_gemini_31_or_newer(rerank_model):
+            _warn_stale_gemini_pin(rerank_model, default_rerank, role="rerank")
+            rerank_model = default_rerank
 
     return planner_model, rerank_model
 
@@ -542,11 +546,17 @@ def _resolve_x_backend(config: dict[str, Any]) -> str | None:
     return env.get_x_source(config)
 
 
-def _require_gemini_31(model: str, *, role: str) -> None:
-    if model.startswith("gemini-3.1-"):
-        return
-    raise RuntimeError(
-        f"{role} must use a Gemini 3.1 model. Got: {model}"
+def _is_gemini_31_or_newer(model: str) -> bool:
+    match = re.match(r"gemini-(\d+)(?:\.(\d+))?(?:-|$)", model)
+    if not match:
+        return False
+    return (int(match.group(1)), int(match.group(2) or 0)) >= (3, 1)
+
+
+def _warn_stale_gemini_pin(model: str, default: str, *, role: str) -> None:
+    print(
+        f"[Providers] {role} model {model!r} is not Gemini 3.1 or newer; using {default}.",
+        file=sys.stderr,
     )
 
 
@@ -556,12 +566,18 @@ def extract_json(text: str) -> dict[str, Any]:
     if not text:
         raise ValueError("Expected JSON response, got empty text")
     try:
-        return json.loads(text)
+        value = json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"\{[\s\S]*\}", text)
         if not match:
             raise
-        return json.loads(match.group(0))
+        value = json.loads(match.group(0))
+    # Valid JSON is not always an object (Gemini's JSON mode allows a
+    # top-level array). Callers read it with .get(), so a list, null, or
+    # number must fail here, where their ValueError fallback catches it.
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected a JSON object, got {type(value).__name__}")
+    return value
 
 
 def extract_gemini_text(payload: dict[str, Any]) -> str:
