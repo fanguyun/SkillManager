@@ -7,8 +7,8 @@
   "tags": [],
   "source": {
     "type": "git",
-    "ref": "https://github.com/fanguyun/SkillManager.git",
-    "subpath": "ui-ux-pro-max-3",
-    "branch": null
+    "ref": "nextlevelbuilder/ui-ux-pro-max-skill",
+    "subpath": ".claude/skills/ui-ux-pro-max",
+    "branch": "main"
   }
 }
