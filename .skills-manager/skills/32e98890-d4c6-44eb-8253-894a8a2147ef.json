@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "32e98890-d4c6-44eb-8253-894a8a2147ef",
+  "path": "socratic-tutor",
+  "path_key": "socratic-tutor",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "janestreet/agent_skills/socratic-tutor",
+    "subpath": "socratic-tutor",
+    "branch": null
+  }
+}
