@@ -28,8 +28,12 @@ from .resolver_registry import (
 from .ruby_resolution import resolve_ruby_member_calls
 from .csharp_dispatch import resolve_csharp_interface_dispatch
 from .go_dispatch import resolve_go_interface_dispatch
+from .kotlin_dispatch import resolve_kotlin_interface_dispatch
 from .swift_dispatch import resolve_swift_protocol_dispatch
+from .pascal_class_resolution import resolve_pascal_base_classes
+from .dfm_resolution import resolve_dfm_handlers
 from .pascal_resolution import resolve_pascal_inherited_calls
+from .pascal_singleton_resolution import resolve_pascal_singleton_calls
 from .cpp_resolution import CppTypeLookup
 from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_mentions
 
@@ -706,6 +710,124 @@ def _repoint_python_sibling_imports(paths, all_nodes, all_edges, root) -> None:
                 e["target"] = repointed
 
 
+def _repoint_python_sys_path_imports(per_file, all_nodes, all_edges, root) -> None:
+    """Repoint Python plain-import edges targeting modules in directories dynamically
+    added to sys.path via sys.path.insert / sys.path.append (#5253).
+
+    When a script in a subdirectory (e.g. `src/skills/s/scripts/c.py`) adds another
+    non-package directory to sys.path (`sys.path.insert(0, '../../bin')`), a subsequent
+    plain import (`import b`) resolves at runtime to `src/bin/b.py`. Repointing the
+    import edge here to the canonical file node ID ensures downstream member calls
+    (`b.f()`) bind to the function node (`b.f`) in `_resolve_python_member_calls`,
+    preventing callers from collapsing onto the file node itself.
+    """
+    if not per_file or not any(r and r.get("_python_sys_path_entries") for r in per_file):
+        return
+
+    node_ids = {n.get("id") for n in all_nodes if isinstance(n, dict)}
+    file_node_by_path: dict[Path, str] = {}
+    for n in all_nodes:
+        if not isinstance(n, dict):
+            continue
+        sf = n.get("source_file") or ""
+        if not sf or effective_suffix(sf).lower() not in (".py", ".pyi"):
+            continue
+        nid = n.get("id")
+        if not isinstance(nid, str):
+            continue
+        lbl = str(n.get("label", ""))
+        rel_name = Path(sf).name
+        if lbl != rel_name:
+            continue
+        try:
+            p = Path(sf)
+            if not p.is_absolute():
+                p = (root / p).resolve()
+            else:
+                p = p.resolve()
+            file_node_by_path[p] = nid
+        except (ValueError, OSError):
+            continue
+
+    try:
+        root_path = Path(root).resolve()
+    except OSError:
+        root_path = Path(root)
+
+    for r in per_file:
+        if not r or not r.get("_python_sys_path_entries"):
+            continue
+        sf = ""
+        for n in r.get("nodes", []):
+            if n.get("source_file"):
+                sf = str(n["source_file"])
+                break
+        if not sf:
+            continue
+        try:
+            sf_p = Path(sf)
+            if not sf_p.is_absolute():
+                sf_p = (root_path / sf_p).resolve()
+            else:
+                sf_p = sf_p.resolve()
+        except OSError:
+            continue
+
+        file_dir = sf_p.parent
+        target_dirs: list[Path] = []
+        for entry in r["_python_sys_path_entries"]:
+            curr = file_dir
+            while True:
+                try:
+                    cand_dir = (curr / entry).resolve()
+                    if cand_dir.is_dir() and cand_dir not in target_dirs:
+                        target_dirs.append(cand_dir)
+                except OSError:
+                    pass
+                if curr == root_path or curr == curr.parent:
+                    break
+                curr = curr.parent
+            try:
+                cand_dir = (root_path / entry).resolve()
+                if cand_dir.is_dir() and cand_dir not in target_dirs:
+                    target_dirs.append(cand_dir)
+            except OSError:
+                pass
+
+        if not target_dirs:
+            continue
+
+        for e in all_edges:
+            if not (
+                isinstance(e, dict)
+                and e.get("relation") in ("imports", "imports_from")
+                and str(e.get("source_file", "")) == sf
+            ):
+                continue
+            tgt = e.get("target")
+            if tgt in node_ids:
+                continue
+            if not isinstance(tgt, str):
+                continue
+            if tgt in _PYTHON_STDLIB_MODULE_NAMES:
+                continue
+
+            hits = set()
+            for td in target_dirs:
+                py_cand = td / f"{tgt}.py"
+                pyi_cand = td / f"{tgt}.pyi"
+                pkg_cand = td / tgt / "__init__.py"
+                hit_nid = (
+                    file_node_by_path.get(py_cand)
+                    or file_node_by_path.get(pyi_cand)
+                    or file_node_by_path.get(pkg_cand)
+                )
+                if hit_nid is not None and hit_nid != e.get("source"):
+                    hits.add(hit_nid)
+            if len(hits) == 1:
+                e["target"] = next(iter(hits))
+
+
 
 SEMANTIC_RELATIONS = frozenset({
     "inherits", "implements", "mixes_in", "embeds", "references",
@@ -1216,11 +1338,14 @@ def _import_c(node, source: bytes, file_nid: str, stem: str, edges: list, str_pa
                     "source_location": f"L{node.start_point[0] + 1}",
                     "weight": 1.0,
                 }
-                if child.type != "system_lib_string":
-                    edge_dict["metadata"] = sanitize_metadata({
-                        "raw_include": raw,
-                        "include_kind": "quoted",
-                    })
+                # Angle includes are tagged too (#5218): a directory-qualified
+                # one (`<liba/Bus.h>`) can then resolve to a corpus header in
+                # _resolve_c_include_edges, and an unresolved standard header
+                # (`<functional>`) stays out of the bare-stem alias index.
+                edge_dict["metadata"] = sanitize_metadata({
+                    "raw_include": raw,
+                    "include_kind": "quoted" if child.type != "system_lib_string" else "angle",
+                })
                 edges.append(edge_dict)
             break
 
@@ -1893,6 +2018,36 @@ def _extract_python_rationale(path: Path, result: dict) -> None:
         root = tree.root_node
     except Exception:
         return
+
+    # Extract dynamic sys.path modifications (#5253): sys.path.insert / sys.path.append
+    sys_path_entries: list[str] = []
+    for stmt in root.children:
+        if stmt.type != "expression_statement":
+            continue
+        for child in stmt.children:
+            if child.type == "call":
+                fn = child.child_by_field_name("function")
+                if fn and fn.type == "attribute":
+                    attr = fn.child_by_field_name("attribute")
+                    obj = fn.child_by_field_name("object")
+                    if attr and obj and obj.type == "attribute":
+                        sub_attr = obj.child_by_field_name("attribute")
+                        sub_obj = obj.child_by_field_name("object")
+                        if (
+                            source[sub_obj.start_byte:sub_obj.end_byte] == b"sys"
+                            and source[sub_attr.start_byte:sub_attr.end_byte] == b"path"
+                            and source[attr.start_byte:attr.end_byte] in (b"insert", b"append")
+                        ):
+                            args = child.child_by_field_name("arguments")
+                            if args:
+                                for a in args.children:
+                                    if a.type in ("string", "concatenated_string"):
+                                        val = source[a.start_byte:a.end_byte].decode("utf-8", errors="replace")
+                                        val = val.strip("\"'")
+                                        if val:
+                                            sys_path_entries.append(val)
+    if sys_path_entries:
+        result["_python_sys_path_entries"] = sys_path_entries
 
     stem = _file_stem(path)
     str_path = str(path)
@@ -4463,7 +4618,8 @@ def extract_php(path: Path) -> dict:
         source = _php_blank_unparsed_casts(_read_source_bytes(path))
     except Exception:
         source = None  # let _extract_generic read the file and report errors
-    result = _extract_generic(path, _PHP_CONFIG, source_override=source)
+    # Every call site, not one per pair: the build folds repeats into `also_seen`.
+    result = _extract_generic(path, _PHP_CONFIG, source_override=source, preserve_call_sites=True)
     try:
         src = _read_source_text(path, warn=False)
         masked, had_script = _php_mask_to_script_blocks(src)
@@ -4854,6 +5010,8 @@ def _rewire_unique_stub_nodes(
             elif _is_top_level_function_definition(node):
                 func_by_label.setdefault(key, []).append(node)
             continue
+        if node.get("_cpp_std"):
+            continue  # the standard library's own type: never a project symbol (#5219)
         stubs.append(node)
 
     # Language families referencing each stub, for the function-merge guard (#1781):
@@ -4880,6 +5038,10 @@ def _rewire_unique_stub_nodes(
                     supertype_stub_ids.add(str(nid))
 
     remap: dict[str, str] = {}
+    # #5240: every crate's `use crate::…::X` points at the same bare stub id, but each
+    # stub resolves within its own file's crate. A Rust edge takes its own file's
+    # answer, so one crate's X is never handed to another crate.
+    file_remap: dict[tuple[str, str], str | None] = {}
     for stub in stubs:
         stub_id = str(stub.get("id", ""))
         if not stub_id:
@@ -4915,11 +5077,18 @@ def _rewire_unique_stub_nodes(
                 cand_fam = _lang_family(fcands[0].get("source_file"))
                 if not fams or cand_fam is None or cand_fam in fams:
                     candidates = fcands
-        if len(candidates) != 1:
-            continue
-        target_id = candidates[0].get("id")
-        if isinstance(target_id, str) and target_id and target_id != stub_id:
-            remap[stub_id] = target_id
+        resolved: str | None = None
+        if len(candidates) == 1:
+            target_id = candidates[0].get("id")
+            if isinstance(target_id, str) and target_id and target_id != stub_id:
+                resolved = target_id
+        origin = str(stub.get("origin_file", ""))
+        if origin.endswith(".rs"):
+            # Two stubs of one file that disagree leave that file's edges unbound.
+            key = (stub_id, origin)
+            file_remap[key] = resolved if file_remap.get(key, resolved) == resolved else None
+        if resolved is not None:
+            remap[stub_id] = resolved
 
     # SQL: a table no file defines is one table however many files read it, so the
     # per-file stubs of one name fold into a single node.
@@ -5017,8 +5186,12 @@ def _rewire_unique_stub_nodes(
             ) and not _cross_language_candidate(edge, remapped_source):
                 edge["source"] = remapped_source
         target = edge.get("target")
-        if target in remap:
-            remapped_target = remap[str(target)]
+        own_key = (str(target), str(edge.get("source_file", "")))
+        if own_key in file_remap:
+            remapped_target = file_remap[own_key]  # None: this file's stub found no match
+        else:
+            remapped_target = remap.get(str(target))
+        if remapped_target is not None:
             if not (
                 is_csharp_scoped_edge
                 and _is_cs_file(str(by_id.get(remapped_target, {}).get("source_file", "")))
@@ -5470,14 +5643,21 @@ def _park_unresolved_member_call(
     if not isinstance(parked, list) or len(parked) >= _MAX_PARKED_CALLS_PER_NODE:
         return
     callee, receiver_type = str(callee), str(receiver_type)
+    # The argument count tells overloads of one name apart after the merge
+    # (#5251); calls without one (most languages) keep the old key.
+    arity = raw_call.get("arity")
+    arity = arity if isinstance(arity, int) and not isinstance(arity, bool) else None
     for previous in parked:
         if (
             isinstance(previous, dict)
             and previous.get("callee") == callee
             and previous.get("receiver_type") == receiver_type
+            and previous.get("arity") == arity
         ):
             return
-    entry = {"callee": callee, "receiver_type": receiver_type, "lang": lang}
+    entry: dict[str, object] = {"callee": callee, "receiver_type": receiver_type, "lang": lang}
+    if arity is not None:
+        entry["arity"] = arity
     location = raw_call.get("source_location")
     if location:
         entry["line"] = str(location)
@@ -7232,6 +7412,17 @@ def _resolve_csharp_member_calls(
                 continue
             type_nid = bases[0]
             type_qualified = True
+        elif rc.get("receiver_var_chain"):
+            # `var a = T.P; a.M()` (#5376): `a` has the declared type of P.
+            var_chain = rc["receiver_var_chain"]
+            type_nid = _resolve_type_name_nid(var_chain[0], caller_node, src_file)
+            for field in var_chain[1:]:
+                if not type_nid:
+                    break
+                type_nid = _field_type_nid(type_nid, field)
+            if not type_nid:
+                continue
+            type_qualified = False
         elif receiver[:1].isupper():
             # Type.M() — the type is named explicitly. A field/property/local of
             # that name in scope shadows the type (`IStore Store => ...;
@@ -7695,9 +7886,13 @@ def _resolve_php_member_calls(
     receiver and marks it a member call; this resolver binds it to the class's
     actual method node, mirroring ``_resolve_java_member_calls``.
 
-    ``self::``/``static::`` resolve to the enclosing class (exact — the keyword
-    names it as unambiguously as a literal class name would). ``parent::``
-    resolves through a single `inherits` edge from the enclosing class. A
+    ``self::``/``static::`` and ``$this->`` resolve to the enclosing class (exact
+    — the keyword names it as unambiguously as a literal class name would).
+    ``parent::`` resolves through a single `inherits` edge from the enclosing
+    class. Whatever the scope, the method is looked up the `inherits` chain
+    level by level: the nearest class that provides it wins (its own method,
+    else one from a trait it uses), and a tie on that level binds nothing. Each call site gets its own edge, so a repeat call
+    keeps its line (the build folds it into `also_seen`). A
     ``$var::method()`` dynamic scope is left unresolved — PHP has no
     declared-type table for it to resolve against, and guessing would risk the
     same over-connection the #543/#1219 guard exists to prevent. Every other
@@ -7738,9 +7933,12 @@ def _resolve_php_member_calls(
         method_index.setdefault((owner, key(method_node.get("label", ""))), set()).add(method)
 
     inherits_bases: dict[str, list[str]] = {}
+    used_traits: dict[str, list[str]] = {}
     for edge in all_edges:
         if edge.get("relation") == "inherits":
             inherits_bases.setdefault(edge["source"], []).append(edge["target"])
+        elif edge.get("relation") == "mixes_in":
+            used_traits.setdefault(edge["source"], []).append(edge["target"])
 
     type_table_by_file: dict[str, dict[str, str]] = {}
     for result in per_file:
@@ -7748,12 +7946,46 @@ def _resolve_php_member_calls(
         if tt and tt.get("path"):
             type_table_by_file[str(tt["path"])] = tt.get("table", {})
 
-    existing_pairs = {(edge.get("source"), edge.get("target")) for edge in all_edges}
+    def provided_by(type_nid: str, name: str) -> set[str]:
+        # PHP precedence: the class's own method, then its traits' (nearest
+        # `use` first, through traits that use traits), then the parent's.
+        level, seen = [type_nid], {type_nid}
+        while level:
+            found: set[str] = set()
+            for nid in level:
+                found |= method_index.get((nid, name), set())
+            if found:
+                return found
+            traits = [t for nid in level for t in used_traits.get(nid, []) if t not in seen]
+            seen.update(traits)
+            level = list(dict.fromkeys(traits))
+        return set()
+
+    def declared_from(type_nid: str, name: str) -> str | None:
+        # The nearest class up the `inherits` chain that provides NAME wins; two
+        # on that nearest level tie and bind nothing, as in Java.
+        level, seen = [type_nid], {type_nid}
+        while level:
+            found: set[str] = set()
+            for nid in level:
+                found |= provided_by(nid, name)
+            if found:
+                return next(iter(found)) if len(found) == 1 else None
+            bases = [base for nid in level for base in inherits_bases.get(nid, []) if base not in seen]
+            seen.update(bases)
+            level = list(dict.fromkeys(bases))
+        return None
+
+    # One edge per call site, not per pair: the build folds a repeated pair into
+    # `also_seen`, so a second call to the same method keeps its line.
+    existing_sites = {(edge.get("source"), edge.get("target"), edge.get("source_location"))
+                      for edge in all_edges}
     for result in per_file:
         for raw_call in result.get("raw_calls", []):
             if not raw_call.get("is_member_call"):
                 continue
-            if not str(raw_call.get("source_file", "")).endswith(".php"):
+            # A remapped extension (`.graphifyrc` `language.inc=php`) is PHP too.
+            if _lang_family(raw_call.get("source_file")) != "php":
                 continue
             receiver = raw_call.get("receiver")
             callee = raw_call.get("callee")
@@ -7772,6 +8004,11 @@ def _resolve_php_member_calls(
                 if len(bases) != 1:
                     continue
                 type_nid = bases[0]
+            elif receiver_lower == "this" and not raw_call.get("php_scoped"):
+                # `$this->m()`: the enclosing class, exact like `self::`.
+                type_nid = enclosing_type.get(caller)
+                if not type_nid:
+                    continue
             elif not raw_call.get("php_scoped") and not receiver.startswith("$"):
                 # Instance receiver (`$g->m()`, `$this->prop->m()`): the type comes
                 # from the annotation table, never the call site, so this rung is
@@ -7806,13 +8043,11 @@ def _resolve_php_member_calls(
                 # resolve against; leave unresolved rather than guess.
                 continue
 
-            method_nids = method_index.get((type_nid, key(callee)), set())
-            if len(method_nids) != 1:
+            method_nid = declared_from(type_nid, key(callee))
+            site = (caller, method_nid, raw_call.get("source_location"))
+            if method_nid is None or method_nid == caller or site in existing_sites:
                 continue
-            method_nid = next(iter(method_nids))
-            if method_nid == caller or (caller, method_nid) in existing_pairs:
-                continue
-            existing_pairs.add((caller, method_nid))
+            existing_sites.add(site)
             all_edges.append({
                 "source": caller,
                 "target": method_nid,
@@ -7881,6 +8116,34 @@ def _resolve_java_member_calls(
         enclosing_type.setdefault(method, owner)
         method_index.setdefault((owner, key(method_node.get("label", ""))), set()).add(method)
 
+    def _one(hits: set[str] | list[str], argc: object) -> str | None:
+        """The single method ``hits`` name, else None. Several overloads of one
+        class are one method when the call's argument count fits exactly one
+        (#5251); two that both fit, or overloads in different classes, stay
+        ambiguous, as the same-name rule has always treated them."""
+        if len(hits) == 1:
+            return next(iter(hits))
+        owners = {enclosing_type.get(h) for h in hits}
+        if len(owners) != 1 or not isinstance(argc, int):
+            return None
+        def _line(h: str) -> int:
+            loc = str((node_by_id.get(h) or {}).get("source_location") or "")
+            return int(loc[1:]) if loc[1:].isdigit() else 0
+
+        fits = []
+        for h in hits:
+            meta = (node_by_id.get(h) or {}).get("metadata") or {}
+            arity = meta.get("arity")
+            if (isinstance(arity, int) and meta.get("min_arity", arity) <= argc
+                    and (argc <= arity or meta.get("variadic"))):
+                fits.append(h)
+        if len(fits) == 1:
+            return fits[0]
+        # Several fit (`run(String)` / `run(int)`) or none does: the first
+        # declared overload stands for the name, as it did when overloads were
+        # one node, and as the same-file walk and the bare-name fallback pick.
+        return min(hits, key=lambda h: (_line(h), h))
+
     existing_pairs = {(edge.get("source"), edge.get("target")) for edge in all_edges}
     # Inherited fields (#3151): a field declared on a superclass - possibly in
     # another file - types a `this.<field>` receiver in the subclass. Safe
@@ -7926,7 +8189,7 @@ def _resolve_java_member_calls(
             queue.extend(bases.get(cls, []))
         return None
 
-    def _inherited_method(class_nid: str, callee_key: str) -> str | None:
+    def _inherited_method(class_nid: str, callee_key: str, argc: object = None) -> str | None:
         # Java's "class wins": a method declared up the superclass chain beats
         # an interface default, whatever the depth. Only then the interfaces,
         # level by level. The class itself was searched in-file.
@@ -7943,7 +8206,7 @@ def _resolve_java_member_calls(
                 return None
             declared = method_index.get((nid, callee_key))
             if declared:
-                return next(iter(declared)) if len(declared) == 1 else None
+                return _one(declared, argc)
         level = list(dict.fromkeys(
             base for nid in [class_nid, *chain] for base in supertypes.get(nid, []) if base not in seen
         ))
@@ -7956,7 +8219,7 @@ def _resolve_java_member_calls(
                     return None
                 hits |= method_index.get((nid, callee_key), set())
             if hits:
-                return next(iter(hits)) if len(hits) == 1 else None
+                return _one(hits, argc)
             level = list(dict.fromkeys(
                 base for nid in level for base in supertypes.get(nid, []) if base not in seen
             ))
@@ -7984,7 +8247,7 @@ def _resolve_java_member_calls(
                 return None
         return bases
 
-    def _method_on_type_or_bases(type_nid: str, callee_key: str) -> str | None:
+    def _method_on_type_or_bases(type_nid: str, callee_key: str, argc: object = None) -> str | None:
         hits: set[str] = set()
         seen: set[str] = set()
         frontier = [type_nid]
@@ -8001,7 +8264,7 @@ def _resolve_java_member_calls(
             if bases is None:
                 return None
             frontier.extend(bases)
-        return next(iter(hits)) if len(hits) == 1 else None
+        return _one(hits, argc)
 
     def _type_named(name: str, near: str | None) -> str | None:
         name = key(name)
@@ -8099,7 +8362,10 @@ def _resolve_java_member_calls(
         if kind == "call":
             owner = (enclosing_type.get(caller) if chain[2] is None
                      else _chain_type(chain[2], caller, depth + 1))
-            method_nid = _method_on_type_or_bases(owner, key(chain[1])) if owner else None
+            method_nid = (
+                _method_on_type_or_bases(owner, key(chain[1]), chain[3] if len(chain) > 3 else None)
+                if owner else None
+            )
             returned = node_by_id.get(method_nid or "", {}).get("_java_ret")
             return _type_named(returned, method_nid) if returned else None
         if kind == "field":
@@ -8121,7 +8387,7 @@ def _resolve_java_member_calls(
             caller = raw_call.get("caller_nid")
             if not raw_call.get("is_member_call"):
                 class_nid = enclosing_type.get(caller)
-                method_nid = _inherited_method(class_nid, key(callee)) if class_nid and callee else None
+                method_nid = _inherited_method(class_nid, key(callee), raw_call.get("arity")) if class_nid and callee else None
                 # `new Base()` names a constructor, which is not inherited.
                 owner = node_by_id.get(enclosing_type.get(method_nid or ""), {})
                 if (method_nid and method_nid != caller and key(owner.get("label", "")) != key(callee)
@@ -8131,7 +8397,7 @@ def _resolve_java_member_calls(
             chain = raw_call.get("java_receiver_chain")
             if chain and not receiver and callee and caller:
                 type_nid = _chain_type(chain, caller)
-                method_nid = _method_on_type_or_bases(type_nid, key(callee)) if type_nid else None
+                method_nid = _method_on_type_or_bases(type_nid, key(callee), raw_call.get("arity")) if type_nid else None
                 if method_nid and method_nid != caller and (caller, method_nid) not in existing_pairs:
                     existing_pairs.add((caller, method_nid))
                     all_edges.append({
@@ -8199,7 +8465,7 @@ def _resolve_java_member_calls(
                 if not type_nid:
                     continue
 
-            method_nid = _method_on_type_or_bases(type_nid, key(callee))
+            method_nid = _method_on_type_or_bases(type_nid, key(callee), raw_call.get("arity"))
             if not method_nid or method_nid == caller or (caller, method_nid) in existing_pairs:
                 continue
             _emit(caller, method_nid, raw_call, exact)
@@ -8683,7 +8949,7 @@ def _resolve_c_include_edges(
     resolution_nodes: list[dict],
     root: Path | None = None,
 ) -> None:
-    """Resolve unresolved quoted C/C++/ObjC include edges to matching header file nodes (#4354).
+    """Resolve unresolved C/C++/ObjC include edges to matching header file nodes (#4354, #5218).
 
     When a quoted #include / #import is outside the including file's directory,
     _resolve_c_include_path cannot resolve it, so per-file extraction emits a
@@ -8692,8 +8958,10 @@ def _resolve_c_include_edges(
     established, but before import-evidence indexing.
 
     Resolution rules:
-    1. Only processes unresolved quoted includes (metadata.include_kind == "quoted"
-       and metadata.raw_include is present).
+    1. Only processes unresolved quoted or angle includes (metadata.include_kind
+       is "quoted" or "angle" and metadata.raw_include is present). An angle
+       include is considered only when it has a directory component
+       (`<liba/Bus.h>`); a bare `<name>` is left alone (#5218).
     2. Explicit relative (./ or ../) or absolute paths that failed sibling
        resolution are never resolved via corpus fallback.
     3. Matches the full include path as a path suffix, not merely the basename
@@ -8753,7 +9021,8 @@ def _resolve_c_include_edges(
         md = e.get("metadata")
         if not isinstance(md, dict):
             continue
-        if md.get("include_kind") != "quoted":
+        include_kind = md.get("include_kind")
+        if include_kind not in ("quoted", "angle"):
             continue
         raw = md.get("raw_include")
         if not raw or not isinstance(raw, str):
@@ -8761,6 +9030,11 @@ def _resolve_c_include_edges(
 
         raw_norm = raw.replace("\\", "/").strip()
         if not raw_norm:
+            continue
+        # An angle include without a directory (`<functional>`, `<config.h>`)
+        # names no path to match, so a same-named project header is not
+        # evidence for it (#5218).
+        if include_kind == "angle" and "/" not in raw_norm:
             continue
 
         if raw_norm.startswith(("./", "../", "/")):
@@ -9310,11 +9584,14 @@ def _resolve_go_member_calls(
         return
     package_vars_by_file: dict[str, dict[str, str | None]] = {}
     imports_by_file: dict[str, dict[str, str]] = {}
+    package_path_by_file: dict[str, str] = {}
     for result in per_file:
         tt = result.get("go_type_table")
         if tt and tt.get("path"):
             package_vars_by_file[tt["path"]] = tt.get("package_vars", {})
             imports_by_file[tt["path"]] = result.get("go_imports") or {}
+            if tt.get("package_path"):
+                package_path_by_file[tt["path"]] = tt["package_path"]
 
     def _key(label: object) -> str:
         return str(label or "").strip().removeprefix(".").removesuffix("()")
@@ -9387,7 +9664,18 @@ def _resolve_go_member_calls(
             if not type_defs:
                 continue
         else:
+            # A bare name is a same-package reference (Go requires a qualifier
+            # for anything else), so two packages that both declare a type of
+            # this name must not collide into one corpus-wide ambiguity (#5242):
+            # narrow to the caller's own package when that is known, the same
+            # import evidence the qualified branch above already insists on.
             type_defs = type_def_nids.get(_key(type_name), [])
+            caller_package = package_path_by_file.get(rc.get("source_file", ""))
+            if caller_package:
+                scoped = [nid for nid in type_defs
+                          if caller_package in package_paths_by_nid.get(nid, ())]
+                if scoped:
+                    type_defs = scoped
         if not type_defs:
             # Declared nowhere here — usually "in a repo this build does not contain",
             # so park it for the merge (#3152). The extractor's language tag already
@@ -9660,7 +9948,8 @@ def _resolve_kotlin_member_calls(
         rc
         for result in per_file
         for rc in result.get("raw_calls", [])
-        if rc.get("lang") == "kotlin" and rc.get("kotlin_object_receiver")
+        if rc.get("lang") == "kotlin"
+        and (rc.get("kotlin_object_receiver") or rc.get("kotlin_receiver_type"))
         and rc.get("callee") and rc.get("caller_nid")
     ]
     if not raw:
@@ -9703,7 +9992,7 @@ def _resolve_kotlin_member_calls(
 
     existing_pairs = {(e.get("source"), e.get("target")) for e in all_edges}
     for rc in raw:
-        receiver = rc["kotlin_object_receiver"]
+        receiver = rc.get("kotlin_object_receiver") or rc["kotlin_receiver_type"]
         callee = rc["callee"]
         caller = rc["caller_nid"]
         type_nids = types_by_name.get(receiver, [])
@@ -9728,7 +10017,21 @@ def _resolve_kotlin_member_calls(
             m for m in methods_by_type.get(type_nids[0], [])
             if str(node_by_id.get(m, {}).get("label", "")).strip("()") == wanted
         ))
-        if len(candidates) != 1:
+        # Overloads of a Java method are one node each since #5251, and a Kotlin
+        # call site carries no argument count to choose between them. The first
+        # declared stands for the name, as it did when they were one node, but
+        # which overload runs is a guess, so the edge is INFERRED.
+        overloaded = len(candidates) > 1 and all(
+            isinstance((node_by_id.get(c, {}).get("metadata") or {}).get("arity"), int)
+            for c in candidates
+        )
+        if overloaded:
+            candidates.sort(key=lambda c: (
+                int(str(node_by_id[c].get("source_location") or "L0")[1:] or 0)
+                if str(node_by_id[c].get("source_location") or "L0")[1:].isdigit() else 0,
+                c,
+            ))
+        elif len(candidates) != 1:
             continue
         tgt = candidates[0]
         if tgt == caller or (caller, tgt) in existing_pairs:
@@ -9739,8 +10042,9 @@ def _resolve_kotlin_member_calls(
             "target": tgt,
             "relation": "calls",
             "context": "call",
-            "confidence": "EXTRACTED",  # the receiver names the type explicitly in source
-            "confidence_score": 1.0,
+            # the receiver names the type explicitly in source
+            "confidence": "INFERRED" if overloaded else "EXTRACTED",
+            "confidence_score": 0.85 if overloaded else 1.0,
             "source_file": rc.get("source_file", ""),
             "source_location": rc.get("source_location"),
             "weight": 1.0,
@@ -9854,6 +10158,19 @@ register_language_resolver(
         _resolve_elixir_qualified_calls,
     )
 )
+# Pascal/Delphi base-class resolution: the per-file extractor can only find a
+# base class by filename convention (`TFooBar` -> `FooBar.pas`), so every class
+# declared in a differently-named unit arrives as one private stub per
+# inheriting file. Lives in graphify.pascal_class_resolution, and is registered
+# BEFORE the inherited-call resolver below, which walks the `inherits` chain
+# this pass repairs.
+register_language_resolver(
+    LanguageResolver(
+        "pascal_base_classes",
+        frozenset({".pas", ".pp", ".dpr", ".dpk", ".inc"}),
+        resolve_pascal_base_classes,
+    )
+)
 # Pascal/Delphi cross-file inherited-method-call resolution: a call from a
 # manual descendant class to a method it inherits from an ancestor declared
 # in a DIFFERENT file (the common generated-base/manual-descendant split,
@@ -9865,6 +10182,32 @@ register_language_resolver(
         "pascal_inherited_calls",
         frozenset({".pas", ".pp", ".dpr", ".dpk", ".inc"}),
         resolve_pascal_inherited_calls,
+    )
+)
+# Pascal/Delphi global-singleton call resolution: `DM.Open`, where `DM` is a
+# unit-level `var` holding a data module or form -- the idiom most Delphi
+# applications are built on. The per-file pass drops the qualifier and looks
+# the member name up in the CALLER's scope, so the call is left unresolved (or
+# bound to a same-named method of the calling class). Lives in
+# graphify.pascal_singleton_resolution. Registered after the inherited-call
+# resolver so it walks an `inherits` chain any earlier pass has finished with.
+register_language_resolver(
+    LanguageResolver(
+        "pascal_singleton_calls",
+        frozenset({".pas", ".pp", ".dpr", ".dpk", ".inc"}),
+        resolve_pascal_singleton_calls,
+    )
+)
+# Delphi/Lazarus form-to-unit resolution: a form (.dfm/.lfm) and the unit that
+# implements it are extracted independently, so the form's class node and its
+# `OnClick = Handler` stubs sit disconnected from the real class and methods in
+# the sibling .pas. Lives in graphify.dfm_resolution; gated on the FORM
+# suffixes, since a corpus of units with no forms has nothing to pair.
+register_language_resolver(
+    LanguageResolver(
+        "dfm_form_handlers",
+        frozenset({".dfm", ".lfm"}),
+        resolve_dfm_handlers,
     )
 )
 # Kotlin fully-qualified call resolution (#2550): `com.pkg.Fn()` /
@@ -9930,6 +10273,12 @@ register_language_resolver(
 register_language_resolver(
     LanguageResolver(
         "go_interface_dispatch", frozenset({".go"}), resolve_go_interface_dispatch
+    )
+)
+# Kotlin member-level interface dispatch: the C#/Swift pass for Kotlin interfaces.
+register_language_resolver(
+    LanguageResolver(
+        "kotlin_interface_dispatch", frozenset({".kt", ".kts"}), resolve_kotlin_interface_dispatch
     )
 )
 # Markdown code-span mentions (`Widget`, `mod.py::Widget::render`) become
@@ -12643,6 +12992,7 @@ def extract(
     # graph is identical regardless of scan root (#2072).
     _repoint_python_package_imports(paths, all_nodes, all_edges, root)
     _repoint_python_sibling_imports(paths, all_nodes, all_edges, root)
+    _repoint_python_sys_path_imports(per_file, all_nodes, all_edges, root)
     _merge_swift_extensions(per_file, all_nodes, all_edges)
     # Salt colliding ids apart BEFORE the C# partial merge. The merge rewires the
     # edges of every half onto the canonical half's id; if that id collides with
@@ -12720,14 +13070,19 @@ def extract(
     # #4439: a Rust `use` reached its declaration only when a type annotation had left
     # a sourceless node under the same id. Lend the rewire one for each imported name
     # that has none; they are not kept, so an unresolved import dangles as before.
+    # One per importing file, not per name (#5240). Another file's stub resolves
+    # within that file's crate, so it cannot answer for this one.
+    _real_ids = {n.get("id") for n in all_nodes if n.get("source_file")}
+    _stubbed = {(n.get("id"), n.get("origin_file")) for n in all_nodes if not n.get("source_file")}
     _use_stubs = {
-        e["target"]: {
+        (e["target"], e.get("source_file")): {
             "id": e["target"], "label": e["_rust_use_name"], "file_type": "code",
             "source_file": "", "origin_file": e.get("source_file"),
             "_rust_use_roots": ["crate"],
         }
         for e in all_edges
-        if e.get("_rust_use_name", "").isidentifier() and e["target"] not in _fresh_ids
+        if e.get("_rust_use_name", "").isidentifier() and e["target"] not in _real_ids
+        and (e["target"], e.get("source_file")) not in _stubbed
     }
     _rewire_view = all_nodes + list(_use_stubs.values()) + [
         n for n in resolution_context_nodes or [] if n.get("id") not in _fresh_ids]
@@ -12855,7 +13210,32 @@ def extract(
         resolution_nodes = all_nodes + [n for n in resolution_context_nodes if n.get("id") not in fresh_ids]
     else:
         resolution_nodes = all_nodes
+    # Single fused pass over resolution_nodes building three indexes that were
+    # formerly three independent full scans (global_label_to_nids[_ci],
+    # callable_nids, class_nids). No node mutation happens between the original
+    # scans, so one pass is behaviourally identical.
+    #   - callable_nids: callable-def ids for the indirect_call callable guard,
+    #     read from the `_callable` marker on the FINAL (post-remap) nodes — so a
+    #     callback resolves only to a real function/method/class, never a
+    #     same-named data symbol, and the guard never goes stale when node ids
+    #     were relativized/disambiguated above (#1566). Read from
+    #     `resolution_nodes`, not `all_nodes` (#2438): an unchanged callee's
+    #     context node carries the marker persisted in graph.json, so an
+    #     incremental rebuild keeps resolving callbacks into unchanged files
+    #     while data symbols stay excluded.
+    #   - class_nids: class defs are callable only via their constructor; they
+    #     are frequently passed as descriptive values (`select(Model)`, exception
+    #     tuples), not invoked. Excluded from the indirect_call guard below to
+    #     avoid false edges (#2137).
+    # The callable/class markers are read for EVERY node (no rationale/namespace
+    # or C#-constructor skip), so they are collected before the label-index skips.
+    callable_nids: set[str] = set()
+    class_nids: set[str] = set()
     for n in resolution_nodes:
+        if n.get("_callable"):
+            callable_nids.add(n["id"])
+        if n.get("_callable_class"):
+            class_nids.add(n["id"])
         if n.get("file_type") == "rationale" or n.get("type") == "namespace":
             continue
         # A C# constructor is named like its type but never called by name;
@@ -12872,19 +13252,6 @@ def extract(
             global_label_to_nids.setdefault(normalised, []).append(n["id"])
             if _lang_is_case_insensitive(n.get("source_file")):
                 global_label_to_nids_ci.setdefault(normalised.lower(), []).append(n["id"])
-
-    # Callable-def ids for the indirect_call callable guard, read from the `_callable`
-    # marker on the FINAL (post-remap) nodes — so a callback resolves only to a real
-    # function/method/class, never a same-named data symbol, and the guard never goes
-    # stale when node ids were relativized/disambiguated above (#1566). Read from
-    # `resolution_nodes`, not `all_nodes` (#2438): an unchanged callee's context node
-    # carries the marker persisted in graph.json, so an incremental rebuild keeps
-    # resolving callbacks into unchanged files while data symbols stay excluded.
-    callable_nids = {n["id"] for n in resolution_nodes if n.get("_callable")}
-    # Class defs are callable only via their constructor; they are frequently passed
-    # as descriptive values (`select(Model)`, exception tuples), not invoked. Exclude
-    # them from the indirect_call guard below to avoid false edges (#2137).
-    class_nids = {n["id"] for n in resolution_nodes if n.get("_callable_class")}
 
     # JVM name resolution: Java and Kotlin share one package/type namespace.
     # Run before the Kotlin-only resolver and before call evidence is built.
@@ -12918,10 +13285,26 @@ def extract(
     # confirm the caller pulled in the callee's source file.
     file_to_symbol_imports: dict[str, set[str]] = {}
     file_to_module_imports: dict[str, set[str]] = {}
+    # Fused single pass over all_edges. Besides the import-evidence maps this also
+    # builds `existing_pairs` and `call_like_pairs` (formerly two more full edge
+    # scans further down). all_edges is not mutated between here and their former
+    # build sites, so the fused maps are identical:
+    #   - existing_pairs: every (source, target) edge, used (and extended) by the
+    #     direct-call loop below as a dedup set.
+    #   - call_like_pairs: call-like pairs only, for the indirect_call dedup — an
+    #     `imports` edge from a file to the symbol it imports is EXPECTED and must
+    #     not suppress an indirect_call to that same symbol (JS/TS named imports
+    #     create such an edge).
+    existing_pairs: set[tuple] = set()
+    call_like_pairs: set[tuple] = set()
     for e in all_edges:
-        if e.get("relation") == "imports":
+        rel = e.get("relation")
+        existing_pairs.add((e["source"], e["target"]))
+        if rel in ("calls", "indirect_call"):
+            call_like_pairs.add((e["source"], e["target"]))
+        if rel == "imports":
             file_to_symbol_imports.setdefault(e["source"], set()).add(e["target"])
-        elif e.get("relation") == "imports_from" and not e.get("_rust_use_binding"):
+        elif rel == "imports_from" and not e.get("_rust_use_binding"):
             file_to_module_imports.setdefault(e["source"], set()).add(e["target"])
 
     # Map each node back to its containing file node id so we can ask
@@ -12944,7 +13327,18 @@ def extract(
     # file-node-id map because tie-breaking compares the actual file paths.
     _rust_nid_to_label: "dict[str, str] | None" = None
     nid_to_source_file: dict[str, str] = {}
+    # nid -> label, so a resolved Rust call target can be told apart from a
+    # constructor: a function/method node is labelled `name()` / `.name()`, a
+    # data definition (struct/enum/trait) carries the bare name. A cross-file
+    # `Foo(x)` onto a bare-name node constructs a value; it is not a function
+    # call and must not count as one. Built in the SAME pass as the file-node
+    # maps (formerly a separate full scan); unlike nid_to_source_file it covers
+    # every id-bearing node, so it is set before the no-source_file skip.
+    nid_to_label: dict[str, str] = {}
     for n in resolution_nodes:
+        _nid = n.get("id")
+        if _nid:
+            nid_to_label[_nid] = str(n.get("label", ""))
         sf = n.get("source_file")
         if not sf:
             continue
@@ -12962,22 +13356,8 @@ def extract(
             sf_rel = sf_path
         nid_to_file_nid[n["id"]] = _file_node_id(sf_rel)
 
-    existing_pairs = {(e["source"], e["target"]) for e in all_edges}
-    # nid -> label, so a resolved Rust call target can be told apart from a
-    # constructor: a function/method node is labelled `name()` / `.name()`, a
-    # data definition (struct/enum/trait) carries the bare name. A cross-file
-    # `Foo(x)` onto a bare-name node constructs a value; it is not a function
-    # call and must not count as one.
-    nid_to_label: dict[str, str] = {
-        n["id"]: str(n.get("label", "")) for n in resolution_nodes if n.get("id")
-    }
-    # Call-like pairs only, for the indirect_call dedup: an `imports` edge from a
-    # file to the symbol it imports is EXPECTED and must not suppress an
-    # indirect_call to that same symbol (JS/TS named imports create such an edge).
-    call_like_pairs = {
-        (e["source"], e["target"]) for e in all_edges
-        if e.get("relation") in ("calls", "indirect_call")
-    }
+    # existing_pairs, nid_to_label and call_like_pairs are built above in their
+    # fused passes (edge pass and the file-node node pass).
     # JS/TS/JSX modules have no implicit cross-module scope: a call into another
     # file is real ONLY if the caller imported it. So a cross-file call from one
     # of these files with no import evidence is gated below (#1659).
@@ -12991,13 +13371,21 @@ def extract(
 
     # C# `new X()` constructs. Same exclusion the C# type-definition index uses
     # (#3815); without it a `new List<T>()` binds to an enum member named `List`.
-    _member_nids = {
-        e.get("target") for e in all_edges if e.get("relation") in ("case_of", "defines")
-    }
-    _method_nids = {
-        e.get("target") for e in all_edges + list(resolution_context_edges or [])
-        if e.get("relation") == "method"
-    }
+    # Fused: one pass over all_edges builds both _member_nids and _method_nids
+    # (an edge relation is a single value, so the two sets never overlap), then a
+    # second pass folds the context edges into _method_nids. This replaces a
+    # second full all_edges scan plus the `all_edges + list(...)` concatenation.
+    _member_nids: set = set()
+    _method_nids: set = set()
+    for e in all_edges:
+        rel = e.get("relation")
+        if rel in ("case_of", "defines"):
+            _member_nids.add(e.get("target"))
+        elif rel == "method":
+            _method_nids.add(e.get("target"))
+    for e in (resolution_context_edges or []):
+        if e.get("relation") == "method":
+            _method_nids.add(e.get("target"))
     # Top-level Elixir module names per file, for scoping unqualified Elixir
     # calls below. Read from `resolution_nodes` so an unchanged file's modules
     # stay visible on an incremental rebuild (`_elixir_module` is carried by the
@@ -13020,6 +13408,13 @@ def extract(
         callee = rc.get("callee", "")
         if not callee:
             continue
+        python_import_files: set[Path] | None = None
+        if binding := rc.get("_python_import_binding"):
+            callee, module_name, target_file = binding
+            python_import_files = (
+                {Path(target_file).resolve()} if target_file is not None
+                else {Path(p) for p in python_module_alias_files.get(_make_id(module_name), ())}
+            )
         if callee in _LANGUAGE_BUILTIN_GLOBALS:
             continue
         # Skip member-call callees: obj.log() → "log" has no import evidence
@@ -13108,11 +13503,23 @@ def extract(
         candidates = global_label_to_nids.get(callee, [])
         if not candidates and _lang_is_case_insensitive(rc.get("source_file")):
             candidates = global_label_to_nids_ci.get(callee.lower(), [])
+        if python_import_files is not None:
+            candidates = [
+                candidate for candidate in candidates
+                if _js_source_path(nid_to_source_file.get(candidate, ""), root) in python_import_files
+            ]
         if rc.get("language") == "go":
             candidates = [candidate for candidate in candidates if candidate not in _method_nids]
         if not candidates:
             continue
-        if rc.get("lang") == "csharp" and not rc.get("csharp_new") and len(candidates) > 1:
+        # A bare Kotlin call has no `lang` tag and no argument count; it can still
+        # reach a Java class's overloads (a subclass calling `run(1)`), so the JVM
+        # family collapses them too and the first declared stands for the name.
+        if (
+            (rc.get("lang") in ("csharp", "java") or _lang_family(rc.get("source_file")) == "jvm")
+            and not rc.get("csharp_new")
+            and len(candidates) > 1
+        ):
             if not _csharp_overload_cache:
                 _csharp_overload_cache.update(_csharp_overload_index(
                     resolution_nodes, all_edges + list(resolution_context_edges or [])
