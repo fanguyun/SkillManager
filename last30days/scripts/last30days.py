@@ -15,8 +15,12 @@ import re
 import signal
 import sqlite3
 import sys
-from collections.abc import Callable
+import time
+import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 MIN_PYTHON = (3, 12)
 
@@ -50,8 +54,8 @@ if os.name == "nt":
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from lib import company_resolve, competitors as competitors_mod, corpus, dates, discovery_handoff, env, fetch_memo, freshness, html_render, http, patents, permission_preflight, pipeline, reddit, reddit_arctic, reddit_discover, reddit_envelope, reddit_health, reddit_search, reddit_session, registers, render, report_checklist, schema, subproc, ui, web_search_keyless, x_envelope, yahoo_finance
-from lib.private_files import write_private_text
+from lib import company_resolve, competitors as competitors_mod, corpus, dates, discovery_handoff, env, fetch_memo, freshness, health, html_render, http, patents, permission_preflight, person, pipeline, proxy, reddit, reddit_arctic, reddit_discover, reddit_envelope, reddit_health, reddit_search, reddit_session, registers, render, report_checklist, schema, shortform_envelope, subproc, ui, web_search_keyless, x_envelope, yahoo_finance
+from lib.private_files import replace_private_text
 
 atexit.register(subproc.cleanup_children)
 
@@ -295,14 +299,12 @@ def _report_has_private_corpus(report: schema.Report) -> bool:
     items_by_source = getattr(report, "items_by_source", {})
     if isinstance(items_by_source, dict) and items_by_source.get("corpus"):
         return True
+    if isinstance(report, schema.Report) and schema.partition_freshness_verdicts(report, {"corpus"})[1]:
+        return True
     candidates = getattr(report, "ranked_candidates", ())
     if not isinstance(candidates, (list, tuple)):
         return False
-    return any(
-        candidate.source == "corpus"
-        or any(item.source == "corpus" for item in candidate.source_items)
-        for candidate in candidates
-    )
+    return any(schema.candidate_has_corpus(candidate) for candidate in candidates)
 
 
 def _ensure_output_directory(path: Path, *, private: bool) -> None:
@@ -388,20 +390,17 @@ def save_output(
             raise
         if candidate.suffix.lower() == ".md":
             try:
-                from lib import library, library_index
+                from lib import library_index
 
                 save_root = candidate.parent.resolve()
-                if save_root == Path(library.DEFAULT_MEMORY_DIR).expanduser().resolve():
+                db_path = library_index.saved_report_index_path(save_root)
+                # A scoped save must sync a per-directory index with the
+                # same paths scoped search uses; syncing the shared DB
+                # from one scope's scan would prune other scopes' rows.
+                if db_path == library_index.DEFAULT_LIBRARY_DB:
                     library_index.sync_library(save_root)
                 else:
-                    # A scoped save must sync a per-directory index with the
-                    # same paths scoped search uses; syncing the shared DB
-                    # from one scope's scan would prune other scopes' rows.
-                    library_index.sync_library(
-                        save_root,
-                        save_root / "briefings",
-                        db_path=save_root / ".last30days-library.db",
-                    )
+                    library_index.sync_library(save_root, save_root / "briefings", db_path=db_path)
             except (library_index.LibrarySearchUnavailable, OSError, sqlite3.DatabaseError):
                 # Saving research must not depend on the optional local index;
                 # `library search` reports a clear capability error on demand.
@@ -627,6 +626,67 @@ def _scoped_store_db(args: argparse.Namespace) -> Path | None:
     return None
 
 
+def _research_store_enabled(args: argparse.Namespace, config: dict[str, object]) -> bool:
+    store_setting = os.environ.get("LAST30DAYS_STORE") or config.get("LAST30DAYS_STORE") or ""
+    return args.store or str(store_setting).lower() in {"1", "true", "yes"}
+
+
+def _add_preflight_library_writes(
+    preflight: dict, args: argparse.Namespace, config: dict[str, object],
+) -> None:
+    from lib import library_index
+
+    on_save = bool(args.preflight_report_on_save_dir and not args.save_dir)
+    save_dir = args.preflight_report_on_save_dir if on_save else args.save_dir
+    local, conditional = preflight["local_writes"], preflight["conditional_writes"]
+    context_db = None if args.mock else pipeline.library_context_index_path(config, save_dir)
+    if context_db is not None:
+        write = {"kind": "library_index_on_save" if on_save else "library_index", "path": str(context_db)}
+        (conditional if on_save else local).append(write)
+    if save_dir and args.emit != "html":
+        markdown_db = library_index.saved_report_index_path(Path(save_dir).expanduser().resolve())
+        if markdown_db != context_db:
+            conditional.append({"kind": "library_index_on_markdown_save", "path": str(markdown_db)})
+
+
+def _add_preflight_research_writes(
+    preflight: dict, args: argparse.Namespace, config: dict[str, object],
+) -> None:
+    if args.preflight_engine_cache_dir:
+        preflight["conditional_writes"].append({
+            "kind": "engine_cache_on_first_use", "path": args.preflight_engine_cache_dir,
+        })
+    if args.no_research_persistence:
+        return
+    if (
+        env.hosted_backend_configured()
+        and not config.get("_CORPUS_DIRS")
+        and not args.mock and not args.record_fixtures and not args.deep_research
+        and (args.perplexity_search_type is None or not config.get("PERPLEXITY_API_KEY"))
+    ):
+        return
+    mcp_preflight = args.preflight_engine_cache_dir is not None
+    research_writes = preflight["conditional_writes" if mcp_preflight else "local_writes"]
+    kind_suffix = "_on_save" if mcp_preflight else ""
+    if env.CONFIG_DIR is not None:
+        for filename in ("last-run.json", "last-report.json"):
+            research_writes.append({
+                "kind": "research_cache" + kind_suffix, "path": str(env.CONFIG_DIR / filename),
+            })
+        if config.get("_CORPUS_DIRS"):
+            research_writes.append({
+                "kind": "corpus_cache" + kind_suffix, "path": str(env.CONFIG_DIR / corpus.CACHE_FILENAME),
+            })
+    _add_preflight_library_writes(preflight, args, config)
+    if not _research_store_enabled(args, config):
+        return
+    import store
+
+    store_args = argparse.Namespace(save_dir=args.preflight_report_on_save_dir) if mcp_preflight else args
+    db_path = _scoped_store_db(store_args) or store.DB_PATH
+    research_writes.append({"kind": "research_store" + kind_suffix, "path": str(db_path)})
+
+
 def persist_report(report: schema.Report, store_db: Path | None = None) -> dict[str, int]:
     import store
 
@@ -676,12 +736,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Audience synthesis preset for the standard brief (default, exec, dev, creator, eli5)",
     )
+    clarify_group = parser.add_mutually_exclusive_group()
+    clarify_group.add_argument(
+        "--clarify-angle",
+        default=None,
+        help="Hosted backend only: answer its clarification with this angle (an option's query)",
+    )
+    clarify_group.add_argument(
+        "--clarify-broadly",
+        action="store_true",
+        help="Hosted backend only: answer its clarification by running the topic as asked",
+    )
     parser.add_argument(
         "--json-profile",
         default="agent",
         choices=["agent", "raw"],
         help="JSON export profile for --emit=json (default: agent)",
     )
+    parser.add_argument("--require-local-report", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--search", help="Comma-separated source list")
     parser.add_argument("--quick", action="store_true", help="Lower-latency retrieval profile")
     parser.add_argument("--deep", action="store_true", help="Higher-recall retrieval profile")
@@ -702,6 +774,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--drill",
         metavar="TARGET",
         help="Deep follow-up on a cluster from the fresh last-report.json cache",
+    )
+    parser.add_argument(
+        "--followup-topic",
+        metavar="TOPIC",
+        help="Require the cached report for a drill or post-run freshness check to match TOPIC",
+    )
+    parser.add_argument(
+        "--followup-run",
+        metavar="ID",
+        help="Require the cache ID reported by the original research or most recent drill",
     )
     parser.add_argument(
         "--discover",
@@ -766,17 +848,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--diagnose", action="store_true", help="Print provider and source availability")
+    parser.add_argument(
+        "--include-research-backend", action="store_true",
+        help="Include the selected research backend in --diagnose JSON",
+    )
     parser.add_argument("--preflight", action="store_true",
                         help="Print a safe human-readable permission preflight")
     parser.add_argument("--welcome", action="store_true",
                         help="Print the first-run welcome text (engine-owned; relay verbatim)")
     parser.add_argument("--preflight-report-on-save-dir", help=argparse.SUPPRESS)
+    parser.add_argument("--preflight-engine-cache-dir", help=argparse.SUPPRESS)
     parser.add_argument("--no-browser-cookies", action="store_true",
                         help="Disable browser-cookie extraction even when FROM_BROWSER is configured")
     parser.add_argument("--save-dir", help="Optional directory for saving the rendered output")
+    parser.add_argument("--no-research-persistence", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--resolve-save-dir", action="store_true",
         help="Print the skill save directory from flags/config, then exit without research",
+    )
+    parser.add_argument(
+        "--resolve-browser-consent", action="store_true",
+        help="Print whether an explicit browser-cookie grant is active, without reading cookies",
     )
     parser.add_argument(
         "--corpus",
@@ -878,6 +970,20 @@ def build_parser() -> argparse.ArgumentParser:
             "and the topic. At most 50 threads; single-topic runs only."
         ),
     )
+    parser.add_argument(
+        "--shortform-urls",
+        dest="shortform_urls",
+        metavar="PATH",
+        help=(
+            "Path to a last30days-shortform-urls/1 JSON envelope of TikTok and "
+            "Instagram post URLs and TikTok creator profile URLs the hosting "
+            "model found with its own web search ('-' reads stdin). Only each "
+            "entry's url is read; used only by the keyless TikTok/Instagram "
+            "lane (no ScrapeCreators key, or credits exhausted), which dates, "
+            "hydrates and topic-checks every post itself. At most 40 URLs; "
+            "single-topic runs only."
+        ),
+    )
     parser.add_argument("--web-backend", default="auto",
                         choices=["auto", "brave", "exa", "serper", "parallel", "parallel-mcp", "keyless", "none"],
                         help="Web search backend (default: auto; parallel-mcp explicitly opts into the "
@@ -916,6 +1022,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-results", dest="max_results", type=int,
                         help="Override the final ranked-pool cap (pool_limit/rerank_limit) from the depth profile. "
                              "Use for high-volume topics where the default (deep=60) under-covers. See issue #716.")
+    parser.add_argument(
+        "--source",
+        dest="harvest_source",
+        default=None,
+        help="Transcript source for 'library harvest' (auto, all, claude, codex, antigravity, gemini, cursor)",
+    )
+    parser.add_argument(
+        "--since",
+        dest="harvest_since",
+        default=None,
+        help="Only harvest finished briefs on or after YYYY-MM-DD (for 'library harvest')",
+    )
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Preview 'library harvest' without writing files",
+    )
     parser.add_argument("--max-per-source", dest="max_per_source", type=int,
                         help="Override the per-stream cap (per_stream_limit) applied to each (source, subquery) before "
                              "pooling. Raising it increases unique-item yield when one source has many relevant items. "
@@ -928,6 +1052,31 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Use web search to discover subreddits/handles before planning (for platforms without WebSearch)")
     parser.add_argument("--github-user", help="GitHub username for person-mode search (e.g., steipete)")
     parser.add_argument("--github-repo", help="Comma-separated owner/repo for project-mode search (e.g., openclaw/openclaw,paperclipai/paperclip)")
+    parser.add_argument(
+        "--employer",
+        metavar="NAME[:DOMAIN]",
+        help=(
+            "Person run: the person's current employer, as \"Name\" or \"Name:domain\" "
+            "(e.g., \"Northwind Freight:northwind.example\"). Its name and domain become "
+            "identity anchors. Not --company, which researches a company the person leads."
+        ),
+    )
+    parser.add_argument(
+        "--linkedin",
+        metavar="URL",
+        help=(
+            "Person run: the person's LinkedIn profile URL "
+            "(https://www.linkedin.com/in/<name>), trusted as an identity anchor."
+        ),
+    )
+    parser.add_argument(
+        "--email",
+        metavar="ADDR",
+        help=(
+            "Person run: the person's email address. A work domain becomes an identity "
+            "anchor; a personal-mail domain (gmail and similar) does not. Never logged."
+        ),
+    )
     parser.add_argument(
         "--trustpilot-domain",
         help=(
@@ -1163,7 +1312,9 @@ def _resolved_company(
 
     When the Wikidata lookup failed (not when it answered with nothing),
     Yahoo's symbol search is asked for the topic instead, and
-    ``company_lookup`` says how that went.
+    ``company_lookup`` says how that went. When Wikidata answered with
+    nothing and ``EXA_API_KEY`` is set, an official-site search can still
+    fill ``company`` and ``company_site``.
 
     With ``host_ticker`` the host passed ``--ticker``, which is then the only
     ticker source: Wikidata is asked for the company and its site but not for
@@ -1173,9 +1324,13 @@ def _resolved_company(
         return {}
     if host_ticker:
         return dict(
-            company_resolve.resolve_company(entity, listing=False, names=patent_lane)
+            company_resolve.resolve_company(
+                entity, listing=False, names=patent_lane, config=config,
+            )
         )
-    company = company_resolve.resolve_company(entity, names=patent_lane)
+    company = company_resolve.resolve_company(
+        entity, names=patent_lane, config=config,
+    )
     if isinstance(company, company_resolve.FailedLookup):
         backup = yahoo_finance.backup_company(entity, config)
         if backup is None:
@@ -1187,6 +1342,8 @@ def _resolved_company(
         ticker = f", ticker {company['ticker']}" if company.get("ticker") else ""
         if company.get("company_source") == yahoo_finance.BACKUP_SOURCE:
             ticker += " (Yahoo match)"
+        elif company.get("company_source") == company_resolve.EXA_COMPANY_SOURCE:
+            ticker += " (Exa site)"
         sys.stderr.write(f"[Resolve] {entity}: company {company['company']}{ticker}\n")
     if company.get("ticker") or company.get("ticker_candidates"):
         company["ticker_source"] = company.get("company_source") or "wikidata"
@@ -1305,8 +1462,9 @@ def _host_company_sites(
 
     The site the host passed with the name (``Name:site``) is used as it is:
     the host's web search found it, as it finds ``--official-site``. A name
-    passed alone is asked of the company resolver (Wikidata, no key), which
-    answers only for the names it is certain about.
+    passed alone is asked of the company resolver (Wikidata, no key; Exa
+    official-site fallback when ``EXA_API_KEY`` is set and Wikidata names
+    none), which answers only for the names it is certain about.
 
     The jobs lane reads that site's careers page instead of guessing a
     domain from the name, and only such a confirmed site can tie a board to
@@ -1322,7 +1480,9 @@ def _host_company_sites(
         name, site = company["name"], company.get("site") or ""
         if not site and lookups:
             site = str(
-                company_resolve.resolve_company(name, listing=False).get("company_site") or ""
+                company_resolve.resolve_company(
+                    name, listing=False, config=config,
+                ).get("company_site") or ""
             )
             if site:
                 sys.stderr.write(f"[Resolve] --company {name}: official site {site}\n")
@@ -1624,10 +1784,40 @@ REPORT_CACHE_VERSION = "last30days-report-cache/v2"
 DEFAULT_REPORT_CACHE_TTL_SECONDS = 3600
 
 
+class _CachedReport(NamedTuple):
+    report: schema.Report
+    entity_reports: list[tuple[str, schema.Report]] | None
+    path: Path
+    fingerprint: bytes
+    x_envelope_sha256: str | None
+
+
 def _last_report_cache_path() -> Path | None:
     if env.CONFIG_DIR is None:
         return None
     return env.CONFIG_DIR / "last-report.json"
+
+
+@contextmanager
+def _report_cache_lock(cache_path: Path) -> Iterator[None]:
+    # The lock file stays in place so replacing the report cannot split writers across different inodes.
+    fd = os.open(cache_path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+    finally:
+        os.close(fd)
 
 
 def _report_cache_ttl_seconds(config: dict[str, object]) -> int:
@@ -1653,9 +1843,9 @@ def _write_last_run(
     *,
     x_envelope_sha256: str | None = None,
     research_options: dict[str, object] | None = None,
+    expected_cache_fingerprint: bytes | None = None,
 ) -> bool:
-    # ``x_envelope_sha256`` binds the cached report to the --x-posts file it
-    # was built from; _load_last_report_cache misses on any mismatch.
+    # The stored digest binds research replay to the host evidence it used.
     try:
         if env.CONFIG_DIR is None:
             return False
@@ -1675,9 +1865,10 @@ def _write_last_run(
             "report_cache": str(target / "last-report.json"),
             "comparison": bool(entity_reports),
         }
-        write_private_text(target / "last-run.json", json.dumps(payload, indent=2))
+        run_id = uuid.uuid4().hex
         cache_payload = {
             "schema": REPORT_CACHE_VERSION,
+            "run_id": run_id,
             "topic": topic,
             "timestamp": payload["timestamp"],
             "comparison": bool(entity_reports),
@@ -1692,9 +1883,18 @@ def _write_last_run(
             ],
         }
         report_cache_path = target / "last-report.json"
-        write_private_text(report_cache_path, json.dumps(cache_payload, indent=2))
-        if has_private_corpus and os.name != "posix":
-            report_cache_path.chmod(0o600)
+        report_json = json.dumps(cache_payload, indent=2)
+        run_json = json.dumps(payload, indent=2)
+        with _report_cache_lock(report_cache_path):
+            if (
+                expected_cache_fingerprint is not None
+                and hashlib.sha256(report_cache_path.read_bytes()).digest()
+                != expected_cache_fingerprint
+            ):
+                return False
+            replace_private_text(report_cache_path, report_json)
+            replace_private_text(target / "last-run.json", run_json)
+        sys.stderr.write(f"[last30days] Follow-up cache ID: {run_id}\n")
         return True
     except Exception as exc:
         # Never fatal, but never silent either (#787's lesson): callers that
@@ -1711,23 +1911,28 @@ def _load_last_report_cache(
     research_options: dict[str, object] | None = None,
     requested_window: tuple[str, str] | None = None,
     use_cached_envelopes: bool = False,
-) -> tuple[schema.Report, list[tuple[str, schema.Report]] | None, Path] | None:
+    run_id: str | None = None,
+) -> _CachedReport | None:
     cache_path = _last_report_cache_path()
     if cache_path is None or not cache_path.exists():
         return None
     try:
-        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        raw = cache_path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
             raise TypeError("report cache payload must be a JSON object")
         if payload.get("schema") != REPORT_CACHE_VERSION:
             return None
         if not _is_report_cache_fresh(payload.get("timestamp"), ttl_seconds):
             return None
-        # A report built from a --x-posts envelope is only reusable with the
-        # same envelope content; a digest on either side that does not match
-        # the other is a miss.
+        if run_id is not None and payload.get("run_id") != run_id:
+            return None
+        # Explicit follow-ups consume the saved snapshot without needing its
+        # original envelope files. Research replay still matches their digest.
         cached_digest = payload.get("x_envelope_sha256") or None
-        if not use_cached_envelopes and (cached_digest or x_envelope_sha256) and cached_digest != x_envelope_sha256:
+        if cached_digest is not None and not isinstance(cached_digest, str):
+            return None
+        if (not use_cached_envelopes or x_envelope_sha256 is not None) and cached_digest != x_envelope_sha256:
             return None
         cached_options = payload.get("research_options") or {}
         if not isinstance(cached_options, dict):
@@ -1752,13 +1957,13 @@ def _load_last_report_cache(
             for _, report in entity_reports
         ):
             return None
-        if payload.get("comparison"):
-            if len(entity_reports) < 2:
-                return None
-            if len(entity_reports) != len(reports_payload):
-                return None
-            return entity_reports[0][1], entity_reports, cache_path
-        return entity_reports[0][1], None, cache_path
+        comparison = payload.get("comparison")
+        if comparison and (len(entity_reports) < 2 or len(entity_reports) != len(reports_payload)):
+            return None
+        return _CachedReport(
+            entity_reports[0][1], entity_reports if comparison else None,
+            cache_path, hashlib.sha256(raw).digest(), cached_digest,
+        )
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         sys.stderr.write(
             f"[last30days] Could not read report cache {cache_path}: "
@@ -1781,11 +1986,17 @@ def _cache_research_options(
         "company", "jobs_board",
         "trustpilot_domain", "amazon_query", "meta_ads_page", "telegram_sources",
         "competitors", "competitors_list", "polymarket_keywords", "corpus_all_time", "drill",
+        "employer", "linkedin",
     )
     options = {
         name: getattr(args, name, None) for name in names
         if not supplied_only or name in getattr(args, "_explicit_options", ())
     }
+    if not supplied_only or "email" in getattr(args, "_explicit_options", ()):
+        # The person anchor counts toward the cache match, but the address is
+        # stored only as a hash.
+        email = (getattr(args, "email", None) or "").strip().lower()
+        options["email_sha256"] = hashlib.sha256(email.encode("utf-8")).hexdigest() if email else None
     if not supplied_only or "corpus" in getattr(args, "_explicit_options", ()):
         if resolved_corpus_dirs is None:
             resolved_corpus_dirs = corpus.resolve_directories(
@@ -1850,31 +2061,29 @@ def _freshness_enabled(args: argparse.Namespace, config: dict[str, object]) -> b
     return _config_truthy(config.get("LAST30DAYS_VERIFY_FRESHNESS"))
 
 
-def _update_cached_freshness(
-    cache_path: Path,
-    report: schema.Report,
-    entity_reports: list[tuple[str, schema.Report]] | None,
-) -> bool:
+def _update_cached_freshness(cached: _CachedReport) -> bool:
     """Rewrite cached report bodies without extending the research-cache TTL."""
     try:
-        payload = json.loads(cache_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict) or payload.get("schema") != REPORT_CACHE_VERSION:
-            return False
-        existing = payload.get("reports") or []
-        if entity_reports:
-            cached_reports = entity_reports
-        else:
-            label = (
-                str(existing[0].get("entity") or report.topic)
-                if existing and isinstance(existing[0], dict)
-                else report.topic
-            )
-            cached_reports = [(label, report)]
-        payload["reports"] = [
-            {"entity": label, "report": schema.to_dict(cached_report)}
-            for label, cached_report in cached_reports
-        ]
-        cache_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        with _report_cache_lock(cached.path):
+            raw = cached.path.read_bytes()
+            if hashlib.sha256(raw).digest() != cached.fingerprint:
+                return False
+            payload = json.loads(raw.decode("utf-8"))
+            existing = payload.get("reports") or []
+            if cached.entity_reports:
+                cached_reports = cached.entity_reports
+            else:
+                label = (
+                    str(existing[0].get("entity") or cached.report.topic)
+                    if existing and isinstance(existing[0], dict)
+                    else cached.report.topic
+                )
+                cached_reports = [(label, cached.report)]
+            payload["reports"] = [
+                {"entity": label, "report": schema.to_dict(report)}
+                for label, report in cached_reports
+            ]
+            replace_private_text(cached.path, json.dumps(payload, indent=2))
         return True
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         sys.stderr.write(
@@ -1901,20 +2110,36 @@ def _verify_report_set(
         )
 
 
+def _load_followup_report(
+    args: argparse.Namespace,
+    config: dict[str, object],
+) -> _CachedReport | None:
+    cached = _load_last_report_cache(
+        args.followup_topic,
+        ttl_seconds=_report_cache_ttl_seconds(config),
+        use_cached_envelopes=True,
+        run_id=args.followup_run,
+    )
+    if cached is None:
+        scope = ""
+        if args.followup_run:
+            scope = " for the requested run"
+        elif args.followup_topic:
+            scope = " for the requested topic"
+        sys.stderr.write(f"[last30days] No fresh cached report{scope}; run a research pass first.\n")
+    return cached
+
+
 def _run_cached_freshness(
     args: argparse.Namespace,
     config: dict[str, object],
 ) -> int:
-    cached = _load_last_report_cache(
-        None,
-        ttl_seconds=_report_cache_ttl_seconds(config),
-    )
+    cached = _load_followup_report(args, config)
     if cached is None:
-        sys.stderr.write("[last30days] No fresh cached report; run a research pass first.\n")
         return 2
-    report, entity_reports, cache_path = cached
+    report, entity_reports, cache_path = cached.report, cached.entity_reports, cached.path
     _verify_report_set(report, entity_reports, allow_network=not args.mock)
-    if _update_cached_freshness(cache_path, report, entity_reports):
+    if _update_cached_freshness(cached):
         sys.stderr.write(f"[last30days] Updated freshness verdicts in {cache_path}\n")
     else:
         sys.stderr.write("[last30days] warning: freshness cache update failed\n")
@@ -1947,17 +2172,11 @@ def _run_drill(
 ) -> int:
     from lib import planner
 
-    cached = _load_last_report_cache(
-        None,
-        ttl_seconds=_report_cache_ttl_seconds(config),
-    )
+    cached = _load_followup_report(args, config)
     if cached is None:
-        sys.stderr.write(
-            "[last30days] No fresh cached report; run a research pass first.\n"
-        )
         return 2
-    report, entity_reports, cache_path = cached
-    if entity_reports:
+    report = cached.report
+    if cached.entity_reports:
         sys.stderr.write(
             "[last30days] Drill mode needs a single-topic cached report; "
             "run a research pass for one entity first.\n"
@@ -1983,8 +2202,9 @@ def _run_drill(
         return 2
 
     sources = list(drill_plan.source_weights)
+    local_only = sources == ["corpus"]
     drill_config = _drill_config(config, sources)
-    diag = pipeline.diagnose(drill_config, sources, safe=False)
+    diag = pipeline.diagnose(drill_config, sources, safe=args.mock or local_only)
     progress = ui.ProgressDisplay(
         f"{report.topic} — drill: {args.drill}",
         show_banner=True,
@@ -2059,16 +2279,19 @@ def _run_drill(
         target=args.drill,
     )
     if _freshness_enabled(args, config):
-        _verify_report_set(merged, None, allow_network=not args.mock)
+        _verify_report_set(merged, None, allow_network=not args.mock and not local_only)
     else:
         merged.freshness_verdicts = []
-    if _write_last_run(report.topic, merged, research_options=_cache_research_options(args, config)):
-        sys.stderr.write(f"[last30days] Updated drill cache in {cache_path}\n")
+    is_bound = args.followup_topic is not None or args.followup_run is not None
+    if _write_last_run(
+        report.topic, merged,
+        x_envelope_sha256=cached.x_envelope_sha256,
+        research_options=_cache_research_options(args, config),
+        expected_cache_fingerprint=cached.fingerprint if is_bound else None,
+    ):
+        sys.stderr.write(f"[last30days] Updated drill cache in {cached.path}\n")
     else:
-        sys.stderr.write(
-            "[last30days] warning: drill cache update failed; the next drill "
-            "will see the pre-drill report\n"
-        )
+        sys.stderr.write("[last30days] warning: drill cache update failed\n")
 
     store_default = str(
         os.environ.get("LAST30DAYS_STORE")
@@ -2290,11 +2513,12 @@ def _discovery_strict_exit_code(
     )
     if not degraded:
         return 0
+    sys.stdout.flush()
     sys.stderr.write(
-        f"[last30days] strict-exit: degraded sources: {', '.join(degraded)}\n"
+        f"{health.STRICT_EXIT_PREFIX}{', '.join(degraded)}\n"
     )
     sys.stderr.flush()
-    return 3
+    return health.STRICT_EXIT_CODE
 
 
 def _require_discover_mock_parity(
@@ -2808,11 +3032,12 @@ def _strict_exit_code(
     })
     if not degraded:
         return 0
+    sys.stdout.flush()
     sys.stderr.write(
-        f"[last30days] strict-exit: degraded sources: {', '.join(degraded)}\n"
+        f"{health.STRICT_EXIT_PREFIX}{', '.join(degraded)}\n"
     )
     sys.stderr.flush()
-    return 3
+    return health.STRICT_EXIT_CODE
 
 
 def _audience_register_for_run(
@@ -2986,12 +3211,9 @@ def _render_save_and_print(
         sys.stderr.flush()
     if args.publish_html:
         try:
-            has_private_corpus = "corpus" in report.source_status or bool(
-                entity_reports
-                and any("corpus" in entity.source_status for _label, entity in entity_reports)
-            )
+            published_reports = [entity for _label, entity in entity_reports] if entity_reports else [report]
             publish_rendered = rendered
-            if has_private_corpus:
+            if any(schema.report_has_corpus(entity) for entity in published_reports):
                 sys.stderr.write(
                     "[last30days] Excluding local corpus evidence and synthesis from published HTML.\n"
                 )
@@ -3073,13 +3295,13 @@ def _propagate_config_to_environ(config: dict[str, object]) -> None:
     XAI_BASE_URL overrides are silently ignored. This is a no-op for
     keys that are already set in process env.
     """
-    for key in ("OPENAI_BASE_URL", "XAI_BASE_URL", "OPENROUTER_BASE_URL"):
+    for key in ("OPENAI_BASE_URL", "XAI_BASE_URL", "OPENROUTER_BASE_URL", "SCRAPECREATORS_BASE_URL"):
         val = config.get(key)
         if val and not os.environ.get(key):
             os.environ[key] = val
 
 
-def _setup_allows_browser_cookies(args: argparse.Namespace, extra_argv: list[str]) -> bool:
+def _setup_has_fresh_browser_consent(args: argparse.Namespace, extra_argv: list[str]) -> bool:
     return (
         not args.no_browser_cookies
         and not args.diagnose
@@ -3088,17 +3310,91 @@ def _setup_allows_browser_cookies(args: argparse.Namespace, extra_argv: list[str
     )
 
 
+USE_RECORDED_BROWSER_CONSENT_FLAG = "--use-recorded-browser-consent"
+
 SETUP_PASSTHROUGH_FLAGS = {
     "--allow-browser-cookies",
+    USE_RECORDED_BROWSER_CONSENT_FLAG,
     "--device-auth",
     "--github",
     "--github-start",
     "--github-poll",
+    "--install-hooks",
     "--openclaw",
     "--reddit-session",
     "--no-reddit-session",
     "--store-key",
+    "--uninstall-hooks",
 }
+
+INSTALL_HOOKS_FLAG = "--install-hooks"
+UNINSTALL_HOOKS_FLAG = "--uninstall-hooks"
+
+
+def _split_hook_flags(
+    extra_argv: list[str],
+) -> tuple[str | None, str | None, list[str]]:
+    """Pull optional-value ``--install-hooks [HOST]`` / ``--uninstall-hooks [HOST]``.
+
+    Returns ``(install_target, uninstall_target, remaining)``. Each target is
+    ``None`` when absent, ``""`` when passed bare (meaning all detected local
+    harnesses), or the explicit host string when supplied. Callers MUST check
+    ``is not None``, never truthiness.
+    """
+    install_target: str | None = None
+    uninstall_target: str | None = None
+    remaining: list[str] = []
+    i = 0
+    while i < len(extra_argv):
+        arg = extra_argv[i]
+        if arg in (INSTALL_HOOKS_FLAG, UNINSTALL_HOOKS_FLAG):
+            value = ""
+            if i + 1 < len(extra_argv) and not extra_argv[i + 1].startswith("-"):
+                value = extra_argv[i + 1]
+                i += 2
+            else:
+                i += 1
+            if arg == INSTALL_HOOKS_FLAG:
+                install_target = value
+            else:
+                uninstall_target = value
+            continue
+        if arg.startswith(INSTALL_HOOKS_FLAG + "="):
+            install_target = arg[len(INSTALL_HOOKS_FLAG) + 1 :]
+            i += 1
+            continue
+        if arg.startswith(UNINSTALL_HOOKS_FLAG + "="):
+            uninstall_target = arg[len(UNINSTALL_HOOKS_FLAG) + 1 :]
+            i += 1
+            continue
+        remaining.append(arg)
+        i += 1
+    return install_target, uninstall_target, remaining
+
+
+def _run_hook_setup(
+    install_target: str | None,
+    uninstall_target: str | None,
+) -> int:
+    from lib import hook_installer
+
+    if install_target is not None and uninstall_target is not None:
+        sys.stderr.write(
+            "[last30days] pass --install-hooks or --uninstall-hooks, not both.\n"
+        )
+        return 2
+    try:
+        # Bare --install-hooks / --uninstall-hooks uses "" -> "all", so dispatch
+        # checks `is not None` rather than string truthiness.
+        if install_target is not None:
+            result = hook_installer.install_hooks(install_target or "all")
+        else:
+            result = hook_installer.uninstall_hooks(uninstall_target or "all")
+    except ValueError as exc:
+        sys.stderr.write(f"[last30days] {exc}\n")
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 STORE_KEY_FLAG = "--store-key"
 
@@ -3206,6 +3502,154 @@ def _comparison_requested(args: argparse.Namespace, topic: str) -> bool:
         value is not None
         for value in (args.competitors, args.competitors_list, args.competitors_plan)
     ) or len(_planner._comparison_entities(topic, uncapped=True)) >= 2
+
+
+PERSON_FLAGS = (("--employer", "employer"), ("--linkedin", "linkedin"), ("--email", "email"))
+
+
+def _person_inputs_gate(args: argparse.Namespace, topic: str) -> int | None:
+    """Reject person flags that cannot define a person run; exit 2 or None.
+
+    A person run needs a single topic: comparison runs would split the
+    run's lookup caps across entities, so they take no person flags.
+    Malformed values fail here, before any config probe or paid call.
+    """
+    passed = [flag for flag, dest in PERSON_FLAGS if getattr(args, dest) is not None]
+    if not passed:
+        return None
+    if not topic:
+        sys.stderr.write(f"[last30days] {', '.join(passed)} requires a person topic.\n")
+        return 2
+    if _comparison_requested(args, topic):
+        sys.stderr.write(
+            f"[last30days] {', '.join(passed)} applies to a single-person run, not a "
+            "comparison run. Research each person separately.\n"
+        )
+        return 2
+    try:
+        person.build_person_context(
+            topic, employer=args.employer, linkedin=args.linkedin, email=args.email,
+        )
+    except ValueError as exc:
+        sys.stderr.write(f"[last30days] {exc}\n")
+        return 2
+    return None
+
+
+# Wall time for the whole person resolve step, shared by every call in it.
+PERSON_RESOLVE_SECONDS = 60.0
+PERSON_NO_X_REASON = "person run: no X account linked from the person's LinkedIn profile or employer bio"
+
+
+def _resolve_person(
+    ctx: "person.PersonContext", config: dict, requested_sources: list[str] | None,
+) -> "person.PersonContext":
+    """Run the LinkedIn resolution and the employer bio lane concurrently under
+    one shared deadline; return the context with whatever resolved in time.
+
+    Daemon threads, not an executor: a hung lane must not hold the process
+    open past the deadline. The LinkedIn lane works on its own copy of the
+    context, so a straggler can never write to the one the run continues with.
+    """
+    import copy
+    import queue
+    import threading
+
+    from lib import employer_site, person_linkedin
+
+    deadline = time.monotonic() + PERSON_RESOLVE_SECONDS
+    person_linkedin.anchor_supplied_url(ctx)
+    linkedin_ctx = copy.deepcopy(ctx)
+    results: "queue.Queue[tuple[str, object]]" = queue.Queue()
+    run_id = uuid.uuid4().hex
+
+    def _linkedin() -> None:
+        try:
+            value: object = person_linkedin.resolve_linkedin(
+                linkedin_ctx, config, deadline_monotonic=deadline, run_id=run_id,
+                requested_sources=requested_sources,
+            )
+        except Exception as exc:  # noqa: BLE001 - a lane failure is a status
+            sys.stderr.write(f"[Person] LinkedIn resolution failed: {type(exc).__name__}\n")
+            value = None
+        results.put(("linkedin", value))
+
+    def _bio() -> None:
+        try:
+            value: object = employer_site.find_bio(
+                ctx.full_name, domain=ctx.employer_domain or None,
+                employer_name=ctx.employer_name or None, email_domain=ctx.email_domain or None,
+                deadline_monotonic=deadline, site_search=None,
+            )
+        except Exception as exc:  # noqa: BLE001 - a lane failure is a status
+            sys.stderr.write(f"[Person] Employer bio lane failed: {type(exc).__name__}\n")
+            value = {"status": "failed", "url": "", "title": "", "bio": "", "links": [], "domain": ""}
+        results.put(("bio", value))
+
+    for name, target in (("linkedin", _linkedin), ("bio", _bio)):
+        threading.Thread(target=target, name=f"person-{name}", daemon=True).start()
+
+    pending = {"linkedin", "bio"}
+    resolved, bio = None, None
+    while pending:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            name, value = results.get(timeout=remaining)
+        except queue.Empty:
+            break
+        pending.discard(name)
+        if name == "linkedin":
+            resolved = value
+        else:
+            bio = value
+
+    if isinstance(resolved, person.PersonContext):
+        ctx = resolved
+    elif "linkedin" not in pending:
+        ctx.set_linkedin_status(person.LINKEDIN_FAILED)
+    if isinstance(bio, dict):
+        ctx.bio = bio
+    if pending:
+        ctx.timed_out = True
+        if "linkedin" in pending and ctx.linkedin_status is None:
+            ctx.set_linkedin_status(person.LINKEDIN_FAILED)
+        sys.stderr.write(
+            f"[Person] Resolve step hit its {PERSON_RESOLVE_SECONDS:g}s deadline; "
+            f"continuing without: {', '.join(sorted(pending))}\n"
+        )
+    return ctx
+
+
+def _person_resolve_step(
+    args: argparse.Namespace, topic: str, config: dict, requested_sources: list[str] | None,
+) -> "person.PersonContext | None":
+    """Build and resolve the person context; fill empty handle slots.
+
+    Returns None (and changes nothing) when no person flag was passed. Mock
+    runs build the context but make no lookups.
+    """
+    ctx = person.build_person_context(
+        topic, employer=args.employer, linkedin=args.linkedin, email=args.email,
+    )
+    if ctx is None:
+        return None
+    if not args.mock:
+        ctx = _resolve_person(ctx, config, requested_sources)
+    args.x_handle, args.github_user = person.apply_derived_handles(
+        ctx, x_handle=args.x_handle, github_user=args.github_user,
+    )
+    for slot, label in (("x", "X handle"), ("github", "GitHub user")):
+        if slot in ctx.derived_handles:
+            sys.stderr.write(f"[Person] {label} from the person's own links: @{ctx.derived_handles[slot]}\n")
+    if not args.x_handle and not args.no_x_handle:
+        args.no_x_handle = PERSON_NO_X_REASON
+    sys.stderr.write(
+        f"[Person] LinkedIn: {ctx.linkedin_status or 'not checked'}; "
+        f"anchors: {len(ctx.anchors)}; bio page: {(ctx.bio or {}).get('status') or 'not checked'}\n"
+    )
+    return ctx
 
 
 LAW7_HOST_PLAN_EXIT = 2
@@ -3376,18 +3820,22 @@ def _envelope_digest(
     x_main: x_envelope.Envelope | None,
     comp_plan: dict[str, dict] | None,
     reddit_threads: reddit_envelope.Envelope | None = None,
+    shortform_urls: shortform_envelope.Envelope | None = None,
 ) -> str | None:
     """One digest binding the report cache to every host envelope of the run.
 
-    Without a --reddit-threads envelope this is the X digest unchanged; with
-    one, its file digest is folded in, so a different thread list never
-    replays a report built from another.
+    Without a --reddit-threads or --shortform-urls envelope this is the X
+    digest unchanged; with one, its file digest is folded in, so a different
+    thread or URL list never replays a report built from another.
     """
     x_digest = _x_envelope_digest(x_main, comp_plan)
-    if reddit_threads is None:
+    if reddit_threads is None and shortform_urls is None:
         return x_digest
     parts = [f"x:{x_digest}"] if x_digest else []
-    parts.append(f"reddit:{reddit_threads.sha256}")
+    if reddit_threads is not None:
+        parts.append(f"reddit:{reddit_threads.sha256}")
+    if shortform_urls is not None:
+        parts.append(f"shortform:{shortform_urls.sha256}")
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
@@ -3395,9 +3843,12 @@ def _validate_extra_argv(parser: argparse.ArgumentParser, topic: str, extra_argv
     if not extra_argv:
         return
     if topic.lower() == "setup":
-        # --store-key carries a value token; the name itself is allowlisted
-        # later in _run_store_key, not here.
+        if USE_RECORDED_BROWSER_CONSENT_FLAG in extra_argv and len(extra_argv) > 1:
+            parser.error(f"{USE_RECORDED_BROWSER_CONSENT_FLAG} must be the only setup option")
+        # --store-key and --install-hooks/--uninstall-hooks carry optional
+        # value tokens validated later by their handlers, not here.
         _, _, extra_argv = _split_store_key(extra_argv)
+        _, _, extra_argv = _split_hook_flags(extra_argv)
         unsupported = [arg for arg in extra_argv if arg not in SETUP_PASSTHROUGH_FLAGS]
         if unsupported:
             parser.error(
@@ -3431,8 +3882,10 @@ def _validate_extra_argv(parser: argparse.ArgumentParser, topic: str, extra_argv
 
 def _config_policy_for_args(args: argparse.Namespace, topic: str, extra_argv: list[str]) -> env.ConfigLoadPolicy:
     normalized_topic = "" if args.research_only or args.cached_report else topic.lower()
+    reuse_browser_consent = normalized_topic == "setup" and USE_RECORDED_BROWSER_CONSENT_FLAG in extra_argv
     is_library_command = (
         normalized_topic == "library feed"
+        or normalized_topic == "library harvest"
         or normalized_topic == "library search"
         or normalized_topic.startswith("library search ")
     )
@@ -3455,7 +3908,10 @@ def _config_policy_for_args(args: argparse.Namespace, topic: str, extra_argv: li
         # GitHub, StockTwits) - no cookie-backed source, so no Keychain prompt.
         browser_mode = "plan_only"
     elif normalized_topic == "setup":
-        browser_mode = "read" if _setup_allows_browser_cookies(args, extra_argv) else "off"
+        browser_mode = (
+            "read" if reuse_browser_consent or _setup_has_fresh_browser_consent(args, extra_argv)
+            else "off"
+        )
     elif _law7_host_plan_signal(args, topic):
         # Hosted and cached paths need config before dispatch, but no browser read.
         browser_mode = "plan_only"
@@ -3464,6 +3920,7 @@ def _config_policy_for_args(args: argparse.Namespace, topic: str, extra_argv: li
     return env.ConfigLoadPolicy(
         browser_cookies=browser_mode,
         inspect_ignored_project_config=args.diagnose or args.preflight or normalized_topic == "doctor",
+        require_recorded_browser_consent=reuse_browser_consent,
     )
 
 
@@ -3499,10 +3956,10 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
     output_dir.mkdir(parents=True, exist_ok=True)
     library_id = library.get_or_create_library_id(output_dir)
     rendered_briefs_dir = output_dir / "briefs"
-    has_private_entries = any(
-        render.PRIVATE_CORPUS_START in entry.content for entry in entries
-    )
-    _ensure_output_directory(rendered_briefs_dir, private=has_private_entries)
+    private_entries = {
+        entry.entry_id for entry in entries if library.public_markdown(entry.content) != entry.content
+    }
+    _ensure_output_directory(rendered_briefs_dir, private=bool(private_entries))
 
     def _preserve_hand_written_page(existing_path: Path, generated_marker: str) -> None:
         """Back up any page library feed did not generate before overwriting it."""
@@ -3525,7 +3982,9 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
             f"library feed; preserved the original at {backup.name}\n"
         )
 
+    publishable_entries: list[library.LibraryEntry] = []
     publishable_brief_documents: dict[str, str] = {}
+    omitted_private_briefs = 0
     for entry in entries:
         rendered = html_render.render_library_brief(entry)
         target = rendered_briefs_dir / entry.output_name
@@ -3533,8 +3992,12 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
         save_rendered_output(
             rendered,
             str(target),
-            private=render.PRIVATE_CORPUS_START in entry.content,
+            private=entry.entry_id in private_entries,
         )
+        if library.is_unbounded_private_brief(entry.content, source_format=entry.source_format):
+            omitted_private_briefs += 1
+            continue
+        publishable_entries.append(entry)
         publishable_brief_documents[entry.entry_id] = html_render.render_library_brief(
             entry, include_private=False
         )
@@ -3574,6 +4037,11 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
     )
 
     if args.publish:
+        if omitted_private_briefs:
+            sys.stderr.write(
+                f"[last30days] Omitted {omitted_private_briefs} private local-corpus "
+                "finished brief(s) from public publishing.\n"
+            )
         password = _publish_password_for_args(args, config)
         entry_urls: dict[str, str] = {}
         try:
@@ -3588,7 +4056,7 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
             if batch_error := getattr(brief_results, "error", None):
                 raise batch_error
             published_index = html_render.render_library_index(
-                entries,
+                publishable_entries,
                 entry_urls=entry_urls,
                 feed_url=None,
             )
@@ -3606,7 +4074,7 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
         # Keep the local artifacts useful as a record of the live publication.
         feed_path.write_text(
             feed.render_atom(
-                entries,
+                publishable_entries,
                 library_id=library_id,
                 entry_urls=entry_urls,
                 author=feed_author,
@@ -3614,7 +4082,7 @@ def _run_library_feed(args: argparse.Namespace, config: dict[str, object]) -> in
             encoding="utf-8",
         )
         index_path.write_text(
-            html_render.render_library_index(entries, entry_urls=entry_urls),
+            html_render.render_library_index(publishable_entries, entry_urls=entry_urls),
             encoding="utf-8",
         )
         sys.stderr.write(f"[last30days] Published library to {index_url}\n")
@@ -3691,6 +4159,78 @@ def _run_library_search(
     return 0
 
 
+def _run_library_harvest(
+    args: argparse.Namespace,
+    config: dict[str, object],
+) -> int:
+    """Scan local agent transcripts offline and archive finished briefs."""
+    from lib import brief_capture, library, library_index, transcript_harvest
+
+    if args.publish or args.publish_html:
+        sys.stderr.write("[last30days] library harvest does not publish output.\n")
+        return 2
+    if args.output:
+        sys.stderr.write(
+            "[last30days] library harvest writes into <save_dir>/finished/; "
+            "--output is not supported.\n"
+        )
+        return 2
+
+    since_date = None
+    if args.harvest_since is not None:
+        try:
+            since_date = datetime.date.fromisoformat(args.harvest_since.strip())
+        except ValueError:
+            sys.stderr.write(
+                f"[last30days] invalid --since date '{args.harvest_since}'; expected YYYY-MM-DD.\n"
+            )
+            return 2
+
+    if args.save_dir == "":
+        sys.stderr.write(
+            "[last30days] saving is disabled (--save-dir / LAST30DAYS_MEMORY_DIR is empty); "
+            "pass --save-dir <dir> to run library harvest.\n"
+        )
+        return 2
+    memory_dir = Path(args.save_dir).expanduser() if args.save_dir else library.DEFAULT_MEMORY_DIR
+
+    try:
+        result = transcript_harvest.harvest_transcripts(
+            save_dir=memory_dir,
+            source=args.harvest_source or "auto",
+            since=since_date,
+            dry_run=bool(args.dry_run),
+        )
+    except ValueError as exc:
+        sys.stderr.write(f"[last30days] {exc}\n")
+        return 2
+
+    if not args.dry_run and result.saved > 0:
+        try:
+            save_root = memory_dir.resolve()
+            db_path = library_index.saved_report_index_path(save_root)
+            if db_path == library_index.DEFAULT_LIBRARY_DB:
+                library_index.sync_library(save_root)
+            else:
+                library_index.sync_library(save_root, save_root / "briefings", db_path=db_path)
+        except (library_index.LibrarySearchUnavailable, OSError, sqlite3.DatabaseError):
+            pass
+
+    for note in result.notes:
+        sys.stderr.write(f"[last30days] Harvest note: {note}\n")
+
+    finished_dir = memory_dir.resolve() / brief_capture.FINISHED_SUBDIR
+    saved_label = "Would save" if result.dry_run else "Saved"
+    print(
+        f"Scanned files: {result.scanned_files}\n"
+        f"Matched briefs: {result.matched_briefs}\n"
+        f"{saved_label}: {result.saved}\n"
+        f"Duplicates: {result.duplicates}\n"
+        f"Destination: {finished_dir}"
+    )
+    return 0
+
+
 def _looks_like_entity_topic(topic: str) -> bool:
     """Whether a topic names a person, company, or product rather than a theme.
 
@@ -3726,6 +4266,9 @@ def _looks_like_entity_topic(topic: str) -> bool:
 
 
 def main() -> int:
+    command_started = time.monotonic()
+    # Windows: Printing Press CLIs install off PATH; resolve them before any gate runs (#1434).
+    health.add_managed_bin_dir_to_path()
     parser = build_parser()
     # Use parse_known_args so setup sub-flags (--device-auth, --github,
     # --openclaw) pass through without argparse hard-exiting.
@@ -3739,10 +4282,33 @@ def main() -> int:
         action.dest for action in parser._actions
         if any(option in option_tokens for option in action.option_strings)
     }
-    if args.record_fixtures:
-        with http.recording_requests(Path(args.record_fixtures)):
-            return _main(parser, args, extra_argv)
-    return _main(parser, args, extra_argv)
+    if args.no_research_persistence:
+        if (
+            not args.research_only or not args.topic or args.discover is not None
+            or args.drill or args.cached_report or args.synthesis_file
+            or args.output or args.publish_html or args.record_fixtures
+        ):
+            parser.error("--no-research-persistence requires --research-only and a topic without output or cache modes")
+        args.save_dir = ""
+    try:
+        if args.record_fixtures:
+            with http.recording_requests(Path(args.record_fixtures)):
+                return _main(parser, args, extra_argv, command_started=command_started)
+        return _main(parser, args, extra_argv, command_started=command_started)
+    finally:
+        _report_proxy_session()
+
+
+def _report_proxy_session() -> None:
+    """One stderr line with what the API-key proxy charged this run, if used."""
+    session = proxy.session_id()
+    if session:
+        calls, credits = proxy.session_summary()
+        sys.stderr.write(
+            f"[last30days] API key session {session}: {proxy.format_credits(credits)} "
+            f"credits across {calls} paid call{'' if calls == 1 else 's'}\n"
+        )
+        sys.stderr.flush()
 
 
 def _quality_research_results(report, diag, yt_fetch_stats):
@@ -3781,27 +4347,105 @@ def _quality_research_results(report, diag, yt_fetch_stats):
     }
 
 
+def _unsupported_hosted_options(args: argparse.Namespace) -> list[str]:
+    explicit_options = getattr(args, "_explicit_options", ())
+    options = (
+        ("--days/--lookback-days", args.lookback_days is not None),
+        ("--as-of", args.as_of_date is not None or "as_of_date" in explicit_options),
+        ("--plan", args.plan is not None),
+        ("--auto-resolve", args.auto_resolve),
+        ("--official-site", args.official_site is not None),
+        ("--x-handle", args.x_handle is not None),
+        ("--no-x-handle", args.no_x_handle is not None),
+        ("--x-related", args.x_related is not None),
+        ("--search", args.search is not None),
+        ("--web-backend", args.web_backend != "auto"),
+        ("--hiring-signals", args.hiring_signals),
+        ("--company", args.company is not None),
+        ("--ticker", args.ticker is not None),
+        ("--jobs-board", args.jobs_board is not None),
+        ("--subreddits", args.subreddits is not None),
+        ("--dedicated-subreddits", args.dedicated_subreddits is not None),
+        ("--devto-tags", args.devto_tags is not None),
+        ("--tiktok-hashtags", args.tiktok_hashtags is not None),
+        ("--tiktok-creators", args.tiktok_creators is not None),
+        ("--ig-creators", args.ig_creators is not None),
+        ("--github-user", args.github_user is not None),
+        ("--github-repo", args.github_repo is not None),
+        ("--employer", args.employer is not None),
+        ("--linkedin", args.linkedin is not None),
+        ("--email", args.email is not None),
+        ("--trustpilot-domain", args.trustpilot_domain is not None),
+        ("--amazon-query", args.amazon_query is not None),
+        ("--meta-ads-page", args.meta_ads_page is not None),
+        ("--telegram-sources", args.telegram_sources is not None),
+        ("--polymarket-keywords", args.polymarket_keywords is not None),
+        ("--competitors", args.competitors is not None),
+        ("--competitors-list", args.competitors_list is not None),
+        ("--competitors-plan", args.competitors_plan is not None),
+        ("--max-results", args.max_results is not None),
+        ("--max-per-source", args.max_per_source is not None),
+        ("--max-source-fetches", args.max_source_fetches is not None),
+        ("--corpus-all-time", args.corpus_all_time),
+        ("--store", args.store),
+        ("--output", args.output is not None),
+        ("--synthesis-file", args.synthesis_file is not None),
+        ("--publish-html", args.publish_html),
+        (f"--emit={args.emit}", args.emit not in {"compact", "md", "json"}),
+    )
+    return [flag for flag, requested in options if requested]
+
+
 def _main(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     extra_argv: list[str],
+    *,
+    command_started: float | None = None,
 ) -> int:
+    if command_started is None:
+        command_started = time.monotonic()
+    finalization_deadline = command_started + pipeline.FINALIZATION_WORK_CUTOFF_SECONDS
+    if args.include_research_backend and not args.diagnose:
+        parser.error("--include-research-backend requires --diagnose")
     if args.debug:
         os.environ["LAST30DAYS_DEBUG"] = "1"
 
     if args.cached_report and (
         args.emit != "html" or not args.synthesis_file or not args.topic or args.deep_research
         or args.plan or args.competitors_plan or args.x_posts or args.reddit_threads
+        or args.shortform_urls
         or args.discover is not None or args.drill or args.diagnose or args.preflight
-        or args.welcome or args.resolve_save_dir or args.verify_freshness is True
+        or args.welcome or args.resolve_save_dir or args.resolve_browser_consent
+        or args.verify_freshness is True
     ):
         parser.error("--cached-report requires a topic, --emit=html, and --synthesis-file without research input files, --verify-freshness, or other command modes")
+    topic = " ".join(args.topic).strip()
+    cached_followup = (
+        not topic and (args.drill or args.verify_freshness is True)
+        and args.discover is None
+        and not (
+            args.diagnose or args.preflight or args.welcome
+            or args.resolve_save_dir or args.resolve_browser_consent
+        )
+    )
+    if args.followup_topic is not None and (not cached_followup or not args.followup_topic.strip()):
+        parser.error("--followup-topic requires a nonempty topic and --drill or post-run --verify-freshness")
+    if args.followup_run is not None and (not cached_followup or not re.fullmatch(r"[0-9a-f]{32}", args.followup_run)):
+        parser.error("--followup-run requires a cache ID and --drill or post-run --verify-freshness")
+    if cached_followup and any(
+        value is not None
+        for value in (args.x_posts, args.reddit_threads, args.shortform_urls, args.plan, args.competitors_plan)
+    ):
+        parser.error("cached follow-ups use saved evidence and do not accept new plans or envelope files")
     if args.welcome:
         from lib import setup_wizard
         print(setup_wizard.render_welcome())
         return 0
+    person_exit = _person_inputs_gate(args, topic)
+    if person_exit is not None:
+        return person_exit
 
-    topic = " ".join(args.topic).strip()
     original_topic = topic
     requested_window = (
         dates.get_date_range(
@@ -3815,6 +4459,10 @@ def _main(
     if args.resolve_save_dir:
         print(env.resolve_memory_dir(args.save_dir))
         return 0
+    if args.resolve_browser_consent:
+        granted = not args.no_browser_cookies and env.has_recorded_browser_consent()
+        print("granted" if granted else "not-granted")
+        return 0
     if args.x_posts is not None and _looks_inline_json(args.x_posts):
         sys.stderr.write(
             "[last30days] --x-posts accepts a file path only (inline JSON is not "
@@ -3827,19 +4475,40 @@ def _main(
             "JSON is not accepted); write the envelope to a .json file and pass its path.\n"
         )
         return 2
+    if args.shortform_urls is not None and shortform_envelope.looks_inline_json(args.shortform_urls):
+        sys.stderr.write(
+            "[last30days] --shortform-urls accepts a file path or '-' only (inline "
+            "JSON is not accepted); write the envelope to a .json file and pass its path.\n"
+        )
+        return 2
     if args.publish and command_topic != "library feed":
         sys.stderr.write(
             "[last30days] --publish is only supported by the 'library feed' command.\n"
         )
         return 2
+    if (
+        args.harvest_source is not None
+        or args.harvest_since is not None
+        or args.dry_run
+    ) and command_topic != "library harvest":
+        sys.stderr.write(
+            "[last30days] --source, --since, and --dry-run are only supported by the 'library harvest' command.\n"
+        )
+        return 2
     if command_topic == "setup":
-        # Persisting a credential needs no config load (no Keychain / pass
-        # probes, no cookie policy), so it dispatches before get_config.
+        # Persisting a credential or managing local hook configs needs no
+        # config load (no Keychain / pass probes, no cookie policy), so these
+        # dispatch before get_config.
         store_key_present, store_key_name, _ = _split_store_key(extra_argv)
         if store_key_present:
             return _run_store_key(store_key_name)
+        install_target, uninstall_target, _ = _split_hook_flags(extra_argv)
+        if install_target is not None or uninstall_target is not None:
+            return _run_hook_setup(install_target, uninstall_target)
 
     config = env.get_config(policy=_config_policy_for_args(args, topic, extra_argv))
+    if args.no_research_persistence:
+        config["_no_research_persistence"] = True
     if args.perplexity_search_type is not None:
         config["LAST30DAYS_PERPLEXITY_SEARCH_TYPE"] = args.perplexity_search_type
     # One memo per command: comparison mode runs pipeline.run per entity in
@@ -3948,16 +4617,18 @@ def _main(
 
     if args.preflight:
         requested_sources = resolve_requested_sources(args.search, config)
-        diag = pipeline.diagnose(config, requested_sources, safe=True)
-        if args.save_dir or args.preflight_report_on_save_dir:
-            preflight = permission_preflight.build(
-                config,
-                diag,
-                planned_save_dir=args.save_dir,
-                report_on_save_dir=args.preflight_report_on_save_dir,
-            )
-        else:
-            preflight = diag["permission_preflight"]
+        preflight_config = pipeline.with_plan_source_omissions(config, external_plan)
+        diag = pipeline.diagnose(preflight_config, requested_sources, safe=True)
+        preflight = permission_preflight.build(
+            preflight_config,
+            diag,
+            planned_save_dir=args.save_dir,
+            report_on_save_dir=(
+                None if args.no_research_persistence else args.preflight_report_on_save_dir
+            ),
+            requested_sources=requested_sources,
+        )
+        _add_preflight_research_writes(preflight, args, config)
         if args.emit == "json":
             print(json.dumps(preflight, indent=2, sort_keys=True))
         else:
@@ -3980,6 +4651,8 @@ def _main(
 
     if command_topic == "library feed":
         return _run_library_feed(args, config)
+    if command_topic == "library harvest":
+        return _run_library_harvest(args, config)
     if command_topic == "library search" or command_topic.startswith("library search "):
         return _run_library_search(args, config, topic[len("library search") :].strip())
 
@@ -4034,10 +4707,15 @@ def _main(
                 results["persisted"] = False
             print(json.dumps(results))
             return 0
+        reuse_browser_consent = USE_RECORDED_BROWSER_CONSENT_FLAG in extra_argv
+        if reuse_browser_consent and config.get("_BROWSER_COOKIE_MODE") != "read":
+            print("not-granted")
+            return 0
+        fresh_browser_consent = _setup_has_fresh_browser_consent(args, extra_argv)
         sys.stderr.write("Running auto-setup...\n")
         results = setup_wizard.run_auto_setup(
             config,
-            allow_browser_cookies=_setup_allows_browser_cookies(args, extra_argv),
+            allow_browser_cookies=reuse_browser_consent or fresh_browser_consent,
         )
         # Keep only successful browsers, including distinct service winners;
         # "auto" would also probe browsers that did not supply any cookies.
@@ -4059,9 +4737,7 @@ def _main(
             env.CONFIG_FILE,
             from_browser=from_browser,
             x_cookie_access_denied=denial_marker,
-            browser_consent=(
-                None if args.diagnose else _setup_allows_browser_cookies(args, extra_argv)
-            ),
+            browser_consent=None if args.diagnose or reuse_browser_consent else fresh_browser_consent,
         )
         if not results["env_written"]:
             sys.stderr.write("Setup configuration could not be fully saved; some settings may already be saved.\n")
@@ -4071,7 +4747,7 @@ def _main(
 
     # Bare --discover (no domain) is global trending, so the dispatch keys on
     # "flag present" (is not None), never on the domain string's truthiness.
-    if args.deep_research and not topic:
+    if args.deep_research and not topic and not args.diagnose:
         sys.stderr.write(
             "[last30days] --deep-research requires a normal positional topic; "
             "it cannot be combined with discovery, drill, or cached-only modes.\n"
@@ -4134,6 +4810,7 @@ def _main(
                 "config dir.\n"
             )
             return 2
+        config = {**config, "_finalization_deadline": finalization_deadline}
         if protocol_leg:
             return _run_discover_protocol_leg(args, config)
         return _run_discover(args, config)
@@ -4189,13 +4866,10 @@ def _main(
                 for value in args.polymarket_keywords.split(",")
                 if value.strip()
             ]
-        return _run_drill(args, config)
+        return _run_drill(args, {**config, "_finalization_deadline": finalization_deadline})
 
     if args.verify_freshness and not topic:
         return _run_cached_freshness(args, config)
-
-    if args.lookback_days is None:
-        args.lookback_days = 30
 
     if args.deep_research and not args.diagnose:
         from lib import planner as _planner
@@ -4245,12 +4919,18 @@ def _main(
     # set (and --mock is not), the search runs through the configured remote API
     # instead of local sources; no local provider keys are needed (see
     # lib/hosted.py). With either env var unset, behavior below is byte-identical
-    # to local-only runs - there is no built-in endpoint.
+    # to local-only runs - there is no built-in endpoint. LAST30DAYS_API_MODE=proxy
+    # keeps the run local and sends only paid provider calls through the API
+    # key's metered proxy (lib/proxy.py).
+    if topic and env.proxy_mode_requested() and not proxy.configured():
+        sys.stderr.write(
+            "[last30days] LAST30DAYS_API_MODE=proxy needs LAST30DAYS_API_KEY and an https "
+            "LAST30DAYS_API_BASE; paid sources without their own key stay off.\n"
+        )
     if (
         topic
         and resolved_corpus_dirs
-        and env.read_secret_env("LAST30DAYS_API_KEY")
-        and os.environ.get("LAST30DAYS_API_BASE")
+        and env.hosted_backend_configured()
     ):
         sys.stderr.write(
             "[last30days] Local corpus configured; bypassing the hosted backend so files stay on this machine.\n"
@@ -4268,25 +4948,49 @@ def _main(
         and not args.mock
         and not args.record_fixtures
         and not args.deep_research
-        and env.read_secret_env("LAST30DAYS_API_KEY")
-        and os.environ.get("LAST30DAYS_API_BASE")
+        and env.hosted_backend_configured()
     ):
         sys.stderr.write(
             "[last30days] --perplexity-search-type set; bypassing the hosted backend "
             "because it does not apply the Perplexity search type.\n"
         )
-    if (
-        topic
-        and not args.diagnose
+    uses_hosted_api = (
+        env.hosted_backend_configured()
         and not args.cached_report
         and not args.mock
         and not args.record_fixtures
-        and env.read_secret_env("LAST30DAYS_API_KEY")
-        and os.environ.get("LAST30DAYS_API_BASE")
         and not resolved_corpus_dirs
         and not args.deep_research
         and (args.perplexity_search_type is None or not config.get("PERPLEXITY_API_KEY"))
+    )
+    if (args.clarify_angle is not None or args.clarify_broadly) and not (
+        topic and not args.diagnose and uses_hosted_api
     ):
+        sys.stderr.write(
+            "[last30days] --clarify-angle and --clarify-broadly answer a hosted backend "
+            "clarification, so they apply only to a hosted run.\n"
+        )
+        return 2
+    if topic and not args.diagnose and uses_hosted_api:
+        if args.require_local_report:
+            sys.stderr.write(
+                "[last30days] Watchlist requires structured local reports. "
+                "Unset LAST30DAYS_API_BASE in the watchlist environment to run locally.\n"
+            )
+            return 2
+        unsupported = _unsupported_hosted_options(args)
+        if unsupported:
+            sys.stderr.write(
+                "[last30days] The hosted backend cannot apply these options: "
+                f"{', '.join(unsupported)}. Run locally to use them.\n"
+            )
+            return 2
+        if _comparison_requested(args, topic):
+            sys.stderr.write(
+                "[last30days] The hosted backend cannot run comparisons. "
+                "Run locally to research each entity.\n"
+            )
+            return 2
         if args.perplexity_search_type is not None:
             sys.stderr.write(
                 "hosted backend does not apply --perplexity-search-type and no direct "
@@ -4332,6 +5036,12 @@ def _main(
                 "run locally or omit --reddit-threads.\n"
             )
             return 2
+        if args.shortform_urls is not None:
+            sys.stderr.write(
+                "[last30days] --shortform-urls is not supported by the hosted backend; "
+                "run locally or omit --shortform-urls.\n"
+            )
+            return 2
         from lib import hosted
         depth = "deep" if args.deep else "quick" if args.quick else "default"
         try:
@@ -4346,8 +5056,14 @@ def _main(
         }
         if audience.name != "default":
             hosted_kwargs["register"] = audience.name
+        if args.clarify_angle is not None:
+            hosted_kwargs["clarify"] = {"angle": args.clarify_angle}
+        elif args.clarify_broadly:
+            hosted_kwargs["clarify"] = {"run_broadly": True}
         return hosted.run_hosted(topic, depth, **hosted_kwargs)
 
+    if args.lookback_days is None:
+        args.lookback_days = 30
     requested_sources = resolve_requested_sources(args.search, config)
     if args.deep_research:
         requested_sources = add_deep_research_source(requested_sources)
@@ -4437,11 +5153,53 @@ def _main(
         except reddit_envelope.EnvelopeContractError as exc:
             sys.stderr.write(f"[last30days] {exc.message}\n")
             return 2
+    # Host-found TikTok / Instagram URLs: validated up front like the Reddit
+    # refs. Only the keyless short-form lane reads them.
+    shortform_urls_envelope: shortform_envelope.Envelope | None = None
+    if args.shortform_urls is not None:
+        excluded = {
+            token.strip().lower() for token in str(config.get("EXCLUDE_SOURCES") or "").split(",")
+        }
+        searched = [
+            name for name in ("tiktok", "instagram")
+            if name not in excluded and (requested_sources is None or name in requested_sources)
+        ]
+        if not searched:
+            sys.stderr.write(
+                "[last30days] --shortform-urls ignored: TikTok and Instagram are not searched this run.\n"
+            )
+            args.shortform_urls = None
+    if args.shortform_urls is not None:
+        if not topic:
+            sys.stderr.write("[last30days] --shortform-urls requires a research topic.\n")
+            return 2
+        if _comparison_requested(args, topic):
+            sys.stderr.write(
+                "[last30days] --shortform-urls applies to a single-topic run; "
+                "omit it on a comparison run.\n"
+            )
+            return 2
+        try:
+            shortform_urls_envelope = shortform_envelope.read(args.shortform_urls, topic)
+        except shortform_envelope.EnvelopeContractError as exc:
+            sys.stderr.write(f"[last30days] {exc.message}\n")
+            return 2
+        if all(
+            (env.get_tiktok_token(config) if name == "tiktok" else env.get_instagram_token(config))
+            for name in searched
+        ):
+            sys.stderr.write(
+                "[last30days] --shortform-urls: ScrapeCreators is configured, so it stays the "
+                "TikTok/Instagram path; the host URLs are used only if it runs out of credits.\n"
+            )
     if args.diagnose:
         diag = pipeline.diagnose(
-            config, requested_sources, safe=True,
+            pipeline.with_plan_source_omissions(config, external_plan),
+            requested_sources, safe=True,
             x_envelope=x_posts_envelope is not None,
         )
+        if args.include_research_backend:
+            diag["research_backend"] = "hosted" if uses_hosted_api else "local"
         print(json.dumps(diag, indent=2, sort_keys=True))
         return 0
 
@@ -4485,13 +5243,17 @@ def _main(
         cached = _load_last_report_cache(
             topic,
             ttl_seconds=_report_cache_ttl_seconds(config),
-            x_envelope_sha256=_envelope_digest(x_posts_envelope, comp_plan, reddit_threads_envelope),
+            x_envelope_sha256=_envelope_digest(
+                x_posts_envelope, comp_plan, reddit_threads_envelope, shortform_urls_envelope,
+            ),
             research_options=research_options,
             requested_window=requested_window,
             use_cached_envelopes=args.cached_report,
         )
         if cached is not None:
-            cached_report, cached_entity_reports, cache_path = cached
+            cached_report = cached.report
+            cached_entity_reports = cached.entity_reports
+            cache_path = cached.path
             sys.stderr.write(
                 f"[last30days] Reusing cached report data from {cache_path}\n"
             )
@@ -4502,11 +5264,7 @@ def _main(
                     cached_entity_reports,
                     allow_network=not args.mock,
                 )
-                _update_cached_freshness(
-                    cache_path,
-                    cached_report,
-                    cached_entity_reports,
-                )
+                _update_cached_freshness(cached)
             return _render_save_and_print(
                 args, cached_report, cached_entity_reports, synthesis_md, config
             )
@@ -4526,9 +5284,16 @@ def _main(
         return law7_exit
 
     diag = pipeline.diagnose(
-        config, requested_sources, safe=False,
+        pipeline.with_plan_source_omissions(config, external_plan),
+        requested_sources, safe=args.mock,
         x_envelope=x_posts_envelope is not None,
+        probe_x=(
+            (external_plan is None or pipeline._external_plan_names_source(external_plan, "x"))
+            and not (args.hiring_signals and requested_sources is None)
+            and not any(entry.get("_x_envelope") for entry in comp_plan.values())
+        ),
     )
+    config = {**config, "_finalization_deadline": finalization_deadline}
 
     # Competitor sub-runs shallow-copy this config. The shared object makes the
     # paid Perplexity cap command-wide and thread-safe across that fanout. Keep
@@ -4572,6 +5337,12 @@ def _main(
         # relevance floor entirely — a noisier report beats losing evidence.
         # Skipped when a handle was already supplied, when an external plan
         # owns resolution, or in mock runs.
+        # A person run resolves who the person is before the X-handle gate:
+        # a handle on their profile or bio page changes which lanes run.
+        person_ctx = _person_resolve_step(args, topic, config, requested_sources)
+        if person_ctx is not None:
+            config["_person"] = person_ctx
+
         auto_resolve_topic = topic
         if args.competitors_list is None and (args.competitors is None or comp_plan):
             from lib import planner as _planner
@@ -4597,13 +5368,16 @@ def _main(
             if resolution.get("subreddits") and not subreddits:
                 subreddits = resolution["subreddits"]
                 sys.stderr.write(f"[AutoResolve] Subreddits: {', '.join(subreddits)}\n")
-            if resolution.get("x_handle") and not args.x_handle:
+            # A person run takes handles only from the host or the person's own
+            # profile and bio page; one picked by counting mentions may be a
+            # namesake's.
+            if resolution.get("x_handle") and not args.x_handle and person_ctx is None:
                 args.x_handle = resolution["x_handle"]
                 x_handle_from_auto = True
                 sys.stderr.write(f"[AutoResolve] X handle: @{args.x_handle}\n")
             # Empty x_handle is intentional: do not invent a lexical stand-in.
             # pipeline.run treats an unidentified subject as "skip the X floor".
-            if resolution.get("github_user") and not args.github_user:
+            if resolution.get("github_user") and not args.github_user and person_ctx is None:
                 args.github_user = resolution["github_user"]
                 github_user_from_auto = True
                 sys.stderr.write(f"[AutoResolve] GitHub user: @{args.github_user}\n")
@@ -4619,8 +5393,10 @@ def _main(
                 args.trustpilot_domain = resolution["trustpilot_domain"]
                 trustpilot_domain_is_hint = True
                 sys.stderr.write(f"[AutoResolve] Trustpilot domain: {args.trustpilot_domain} (hint)\n")
-            if resolution.get("trustpilot_domain"):
-                # The brand's review-page domain is its own site.
+            if resolution.get("trustpilot_domain") and person_ctx is None:
+                # The brand's review-page domain is its own site. A person run
+                # skips it: a host whose label matches the bare name may be a
+                # namesake's site.
                 auto_official_site = resolution["trustpilot_domain"]
             if resolution.get("context"):
                 # Inject context into external_plan metadata for the planner to use
@@ -4858,6 +5634,7 @@ def _main(
                     if comp_enabled else x_posts_envelope
                 ),
                 reddit_threads=None if comp_enabled else reddit_threads_envelope,
+                shortform_urls=None if comp_enabled else shortform_urls_envelope,
             )
             patents.collect(patent_lane, r)
             r.artifacts["resolved"] = {
@@ -4921,6 +5698,15 @@ def _main(
                     return 2
                 discovered = competitors_mod.discover_competitors(
                     topic, comp_count, config, lookback_days=args.lookback_days,
+                    is_company=(
+                        not main_company.get("company_via_person")
+                        and main_company.get("company_peer_discovery")
+                        != company_resolve.COMPANY_PEER_KEYWORD
+                        and bool(
+                            main_company.get("company")
+                            or config.get("_company_signal")
+                        )
+                    ),
                 )
                 if not discovered:
                     sys.stderr.write(
@@ -5138,27 +5924,20 @@ def _main(
         report, progress, diag,
         suppress_web_promo=bool(external_plan or comp_plan),
     )
-    _write_last_run(
-        original_topic, report, entity_reports=entity_reports,
-        x_envelope_sha256=_envelope_digest(x_posts_envelope, comp_plan, reddit_threads_envelope),
-        research_options=research_options,
-    )
-    # LAST30DAYS_STORE env var = persistence default-on. Read both os.environ
-    # (for shell-exported users) and config (for users who set it in
-    # ~/.config/last30days/.env, which env.py loads but does not propagate
-    # to os.environ). Mirrors the LAST30DAYS_DEBUG / LAST30DAYS_SKIP_PREFLIGHT
-    # convention; env-var or config wins, with `--store` flag still working.
-    _store_env = (
-        os.environ.get("LAST30DAYS_STORE")
-        or config.get("LAST30DAYS_STORE")
-        or ""
-    ).lower()
-    if args.store or _store_env in ("1", "true", "yes"):
-        counts = persist_report(report, store_db=_scoped_store_db(args))
-        sys.stderr.write(
-            f"[last30days] Stored {counts['new']} new, {counts['updated']} updated findings\n"
+    if not args.no_research_persistence:
+        _write_last_run(
+            original_topic, report, entity_reports=entity_reports,
+            x_envelope_sha256=_envelope_digest(
+                x_posts_envelope, comp_plan, reddit_threads_envelope, shortform_urls_envelope,
+            ),
+            research_options=research_options,
         )
-        sys.stderr.flush()
+        if _research_store_enabled(args, config):
+            counts = persist_report(report, store_db=_scoped_store_db(args))
+            sys.stderr.write(
+                f"[last30days] Stored {counts['new']} new, {counts['updated']} updated findings\n"
+            )
+            sys.stderr.flush()
 
     # Show quality nudge if applicable. Explicit hiring-signal runs are
     # intentionally jobs-focused, so generic source setup advice is noise.

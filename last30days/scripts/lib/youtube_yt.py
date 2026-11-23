@@ -254,6 +254,9 @@ def _lane_seconds_left() -> Optional[float]:
 
 
 def _lane_out_of_time() -> bool:
+    limit = _sc_spend_limit.get()
+    if limit is not None and limit.cancel is not None and limit.cancel.is_set():
+        return True
     seconds_left = _lane_seconds_left()
     return seconds_left is not None and seconds_left <= 0
 
@@ -434,21 +437,33 @@ def _run_ytdlp(
         if abort_if_blocked and _youtube_transcripts_blocked():
             raise _YtdlpBlocked()
 
-    seconds_left = _lane_seconds_left()
-    if seconds_left is None:
+    limit = _sc_spend_limit.get()
+    cancel = limit.cancel if limit else None
+    deadline = _lane_deadline()
+    if deadline is None and cancel is None:
         with _ytdlp_slots:
             _abort_if_blocked()
             return _remember_youtube_block(subproc.run_with_timeout(cmd, timeout=timeout))
-    if not _ytdlp_slots.acquire(timeout=max(0.0, seconds_left)):
-        raise subproc.SubprocTimeout("no yt-dlp slot before the lane deadline", started=False)
+    if deadline is None:
+        deadline = time.monotonic() + timeout
+    while True:
+        if cancel is not None and cancel.is_set():
+            raise subproc.SubprocTimeout("YouTube lane cancelled", started=False)
+        seconds_left = deadline - time.monotonic()
+        if seconds_left <= 0:
+            raise subproc.SubprocTimeout("no yt-dlp slot before the lane deadline", started=False)
+        if _ytdlp_slots.acquire(timeout=min(0.05, seconds_left) if cancel is not None else seconds_left):
+            break
     try:
         _abort_if_blocked()
-        seconds_left = _lane_seconds_left() or 0.0
+        seconds_left = deadline - time.monotonic()
         if seconds_left <= 0:
             raise subproc.SubprocTimeout("lane deadline passed", started=False)
         bounded = min(timeout, seconds_left)
         try:
-            result = subproc.run_with_timeout(cmd, timeout=bounded)
+            result = subproc.run_with_timeout(
+                cmd, timeout=bounded, deadline_monotonic=deadline, cancel=cancel,
+            )
         except subproc.SubprocTimeout as exc:
             # The attempt cap was not what stopped the process. The lane
             # deadline was shorter, so don't report the full cap.
@@ -679,7 +694,7 @@ def _ytdlp_proxy() -> Optional[str]:
     return proxy or None
 
 
-def _wrap_ytdlp_cmd(cmd: List[str]) -> List[str]:
+def wrap_ytdlp_cmd(cmd: List[str]) -> List[str]:
     """Wrap a yt-dlp command list with `ssh <host>` when SSH routing is set.
 
     Args are shell-quoted to survive the remote shell. Uses BatchMode=yes so
@@ -1342,6 +1357,18 @@ def _transcript_backoff(video_id: str, attempt: int) -> float:
     return _TRANSCRIPT_BACKOFF_BASE * (attempt + 1) + offset
 
 
+def _wait_for_transcript_retry(video_id: str, attempt: int) -> bool:
+    delay = _transcript_backoff(video_id, attempt)
+    remaining = _lane_seconds_left()
+    if remaining is not None and delay >= remaining:
+        return False
+    limit = _sc_spend_limit.get()
+    if limit is not None and limit.cancel is not None:
+        return not limit.cancel.wait(delay)
+    time.sleep(delay)
+    return True
+
+
 def _read_vtt(video_id: str, temp_dir: str) -> Optional[str]:
     """Return the VTT text yt-dlp wrote for ``video_id``, or None if absent."""
     vtt_path = _pick_ytdlp_vtt(video_id, temp_dir, _ytdlp_sub_langs().split(","))
@@ -1428,8 +1455,7 @@ def _fetch_transcript_ytdlp(
             partial_vtt = _read_vtt(video_id, temp_dir)
             if partial_vtt is not None:
                 return partial_vtt
-            if attempt < attempts - 1:
-                time.sleep(_transcript_backoff(video_id, attempt))
+            if attempt < attempts - 1 and _wait_for_transcript_retry(video_id, attempt):
                 continue
             break
         except FileNotFoundError:
@@ -1467,10 +1493,12 @@ def _fetch_transcript_ytdlp(
             # Treat as genuine no-captions, not an error worth retrying.
             return None
         last_reason = snippet
-        if _TRANSIENT_RE.search(stderr) and attempt < attempts - 1:
+        if (
+            _TRANSIENT_RE.search(stderr) and attempt < attempts - 1
+            and _wait_for_transcript_retry(video_id, attempt)
+        ):
             _log(f"yt-dlp transcript transient failure for {video_id} "
                  f"(attempt {attempt + 1}/{attempts}): {snippet}")
-            time.sleep(_transcript_backoff(video_id, attempt))
             continue
         # Non-transient, or retries exhausted — surface the real reason.
         _log(f"yt-dlp transcript failed for {video_id} "
@@ -2032,6 +2060,13 @@ def parse_youtube_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:
 SCRAPECREATORS_YT_BASE = "https://api.scrapecreators.com/v1/youtube"
 
 
+def _sc_yt_base() -> str:
+    if SCRAPECREATORS_YT_BASE != "https://api.scrapecreators.com/v1/youtube":
+        return SCRAPECREATORS_YT_BASE
+    from . import env
+    return f"{env.get_scrapecreators_base_url()}/v1/youtube"
+
+
 def _total_engagement(item: Dict[str, Any]) -> int:
     """Combined engagement score for ranking which videos to enrich."""
     eng = item.get("engagement", {})
@@ -2216,7 +2251,7 @@ def _fetch_video_comments(
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     try:
         data = http.get(
-            f"{SCRAPECREATORS_YT_BASE}/video/comments",
+            f"{_sc_yt_base()}/video/comments",
             params={"url": video_url},
             headers=http.scrapecreators_headers(token),
             timeout=30,
@@ -2447,7 +2482,7 @@ def _sc_youtube_search(keyword: str, token: str) -> List[Dict[str, Any]]:
         # parameter for that endpoint is `query`. Other SC endpoints use their
         # own per-endpoint param names so this was the lone outlier.
         data = http.get(
-            f"{SCRAPECREATORS_YT_BASE}/search",
+            f"{_sc_yt_base()}/search",
             params={"query": keyword},
             headers=http.scrapecreators_headers(token),
             timeout=30,
@@ -2516,7 +2551,7 @@ def _sc_fetch_transcript(video_id: str, token: str) -> Optional[str]:
             # capture_failures() context.
             with http.capture_failures() as _tf:
                 data = http.get(
-                    f"{SCRAPECREATORS_YT_BASE}/video/transcript",
+                    f"{_sc_yt_base()}/video/transcript",
                     params={"url": video_url, "language": language},
                     headers=http.scrapecreators_headers(token),
                     timeout=_SC_TRANSCRIPT_TIMEOUT,
@@ -2551,3 +2586,7 @@ def _sc_fetch_transcript(video_id: str, token: str) -> Optional[str]:
         transcript = " ".join(words[:TRANSCRIPT_MAX_WORDS]) + "..."
 
     return transcript if transcript else None
+
+
+# Backward-compat alias: internal call sites predate the public name.
+_wrap_ytdlp_cmd = wrap_ytdlp_cmd

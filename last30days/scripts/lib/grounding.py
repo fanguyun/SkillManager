@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from . import dates, env, http, parallel_mcp, schema, web_search_keyless
+from . import dates, env, http, parallel_mcp, proxy, schema, web_search_keyless
 
 
 @dataclass(frozen=True)
@@ -49,18 +50,29 @@ def claim_source_map(report: schema.Report) -> dict[str, GroundedClaimText]:
 
 def brave_search(
     query: str, date_range: tuple[str, str], api_key: str, count: int = 5,
+    freshness: str | None = None,
+    *,
+    deadline_monotonic: float | None = None,
+    cancel: threading.Event | None = None,
 ) -> tuple[list[dict], dict]:
+    """``freshness`` overrides the request's date-range freshness (e.g. "pm").
+
+    ``deadline_monotonic`` and ``cancel`` bound the request to a caller's run.
+    """
     url = (
         "https://api.search.brave.com/res/v1/web/search?"
         + urllib.parse.urlencode(
             {
                 "q": query,
                 "count": count,
-                "freshness": f"{date_range[0]}to{date_range[1]}",
+                "freshness": freshness or f"{date_range[0]}to{date_range[1]}",
             }
         )
     )
-    data = http.request("GET", url, headers={"X-Subscription-Token": api_key}, timeout=15)
+    data = http.request(
+        "GET", url, headers={"X-Subscription-Token": api_key}, timeout=15,
+        deadline_monotonic=deadline_monotonic, cancel=cancel,
+    )
     items = []
     for i, r in enumerate((data.get("web", {}).get("results", []))[:count]):
         raw_date = r.get("page_age") or ""
@@ -86,21 +98,86 @@ def brave_search(
 # Exa AI Search
 # ---------------------------------------------------------------------------
 
+# Exa's company and people indexes reject publication-date filters (HTTP 400).
+# people also rejects excludeDomains. See https://exa.ai/docs/reference/search
+_EXA_UNDATED_CATEGORIES = frozenset({"company", "people"})
+_EXA_SEARCH_URL = "https://api.exa.ai/search"
+
+
+def exa_api_key(config: dict | None) -> str:
+    """Return EXA_API_KEY when the caller configured one, else ''."""
+    return str((config or {}).get("EXA_API_KEY") or "")
+
+
+def _exa_snippet(result: dict) -> str:
+    """Prefer highlights (Exa's recommended excerpt) and fall back to text."""
+    highlights = result.get("highlights")
+    if isinstance(highlights, str) and highlights.strip():
+        return highlights[:500]
+    if isinstance(highlights, list):
+        parts = [part for part in highlights if isinstance(part, str) and part.strip()]
+        if parts:
+            return " ".join(parts)[:500]
+    return (result.get("text") or "")[:500]
+
+
+def _exa_search_body(
+    query: str,
+    count: int,
+    date_range: tuple[str, str] | None = None,
+    *,
+    category: str | None = None,
+    objective: str | None = None,
+) -> dict:
+    """Build an Exa /search body.
+
+    Highlights are the recommended content shape
+    (https://exa.ai/docs/search/best-practices). Publication-date filters stay
+    on dated, uncategorized paths only: ``company`` and ``people`` reject them.
+    """
+    body: dict = {
+        "query": query,
+        "type": "auto",
+        "numResults": count,
+        "contents": {"highlights": True},
+    }
+    if objective:
+        body["objective"] = objective
+    if category:
+        body["category"] = category
+    if date_range and category not in _EXA_UNDATED_CATEGORIES:
+        body["startPublishedDate"] = f"{date_range[0]}T00:00:00.000Z"
+        body["endPublishedDate"] = f"{date_range[1]}T23:59:59.999Z"
+    return body
+
+
 def exa_search(
-    query: str, date_range: tuple[str, str], api_key: str, count: int = 5,
+    query: str,
+    date_range: tuple[str, str] | None,
+    api_key: str,
+    count: int = 5,
+    *,
+    category: str | None = None,
+    objective: str | None = None,
+    deadline_monotonic: float | None = None,
+    retries: int | None = None,
 ) -> tuple[list[dict], dict]:
+    """Search Exa. ``date_range`` is omitted for entity lookups and for
+    ``category`` values that reject publication-date filters. A caller with a
+    wall-clock budget passes ``deadline_monotonic`` and fewer ``retries``."""
+    limits: dict = {}
+    if deadline_monotonic is not None:
+        limits["deadline_monotonic"] = deadline_monotonic
+    if retries is not None:
+        limits["retries"] = retries
     data = http.request(
-        "POST", "https://api.exa.ai/search",
+        "POST", _EXA_SEARCH_URL,
         headers={"x-api-key": api_key},
-        json_data={
-            "query": query,
-            "type": "auto",
-            "numResults": count,
-            "startPublishedDate": f"{date_range[0]}T00:00:00.000Z",
-            "endPublishedDate": f"{date_range[1]}T23:59:59.999Z",
-            "contents": {"text": {"maxCharacters": 2000}},
-        },
+        json_data=_exa_search_body(
+            query, count, date_range, category=category, objective=objective,
+        ),
         timeout=15,
+        **limits,
     )
     items = []
     for i, r in enumerate((data.get("results", []))[:count]):
@@ -111,21 +188,55 @@ def exa_search(
             continue
         raw_date = r.get("publishedDate") or ""
         pub_date = _normalize_date(raw_date.split("T")[0] if "T" in raw_date else raw_date[:10]) if raw_date else None
-        if _known_date_out_of_range(pub_date, date_range):
+        if date_range and _known_date_out_of_range(pub_date, date_range):
             continue
+        metadata = {}
+        if date_range and category not in _EXA_UNDATED_CATEGORIES:
+            metadata["date_window_basis"] = "server_bounds"
         items.append({
             "id": f"WE{i + 1}",
             "title": r.get("title", ""),
             "url": url,
             "source_domain": _domain(url),
-            "snippet": (r.get("text") or "")[:500],
+            "snippet": _exa_snippet(r),
             "date": pub_date,
             "relevance": 0.8,
             "why_relevant": "Exa web search",
-            "metadata": {"date_window_basis": "server_bounds"},
+            "metadata": metadata,
         })
     artifact = {"label": "exa", "webSearchQueries": [query], "resultCount": len(items)}
+    if category:
+        artifact["category"] = category
     return items, artifact
+
+
+def exa_company_search(
+    query: str,
+    api_key: str,
+    count: int = 8,
+    *,
+    objective: str | None = None,
+) -> tuple[list[dict], dict]:
+    """Undated ``category=company`` search. Never sends publication dates."""
+    return exa_search(
+        query, None, api_key, count, category="company", objective=objective,
+    )
+
+
+def exa_people_search(
+    query: str,
+    api_key: str,
+    count: int = 5,
+    *,
+    objective: str | None = None,
+    deadline_monotonic: float | None = None,
+    retries: int | None = None,
+) -> tuple[list[dict], dict]:
+    """Undated ``category=people`` search. Never sends dates or excludeDomains."""
+    return exa_search(
+        query, None, api_key, count, category="people", objective=objective,
+        deadline_monotonic=deadline_monotonic, retries=retries,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -295,14 +406,23 @@ def _parse_serper_date(raw: str, now: datetime | None = None) -> str | None:
 # ---------------------------------------------------------------------------
 
 def configured_backend(config: dict) -> str | None:
-    """Return the first configured search API backend, excluding keyless search."""
-    for backend, key in (
+    """Return the first configured search API backend, excluding keyless search.
+
+    A backend the user holds a key for wins over one served by the API-key
+    proxy (lib/proxy.py), whatever their order below.
+    """
+    backends = (
         ("brave", "BRAVE_API_KEY"),
         ("exa", "EXA_API_KEY"),
         ("serper", "SERPER_API_KEY"),
         ("parallel", "PARALLEL_API_KEY"),
-    ):
-        if config.get(key):
+    )
+    for backend, key in backends:
+        if config.get(key) and not proxy.is_sentinel(config.get(key)):
+            return backend
+    for backend, key in backends:
+        # A proxy lane the service said it cannot serve is skipped for the run.
+        if config.get(key) and not proxy.provider_unavailable(backend):
             return backend
     return None
 
@@ -314,10 +434,29 @@ def web_search(
     backend: str = "auto",
 ) -> tuple[list[dict], dict]:
     """Run web search with the specified or auto-detected backend."""
-    if backend == "auto":
-        backend = configured_backend(config) or (
+    if backend != "auto":
+        return _web_search_with(backend, query, date_range, config)
+    tried: set[str] = set()
+    while True:
+        chosen = configured_backend(config) or (
             "keyless" if env.keyless_web_allowed(config) else "none"
         )
+        try:
+            return _web_search_with(chosen, query, date_range, config)
+        except Exception:
+            # The service has no key for this proxied provider: try the next
+            # backend instead of failing the web source.
+            if chosen in tried or not proxy.provider_unavailable(chosen):
+                raise
+            tried.add(chosen)
+
+
+def _web_search_with(
+    backend: str,
+    query: str,
+    date_range: tuple[str, str],
+    config: dict,
+) -> tuple[list[dict], dict]:
     items: list[dict] = []
     artifact: dict = {}
     if backend == "brave":
@@ -341,8 +480,10 @@ def web_search(
             raise RuntimeError("PARALLEL_API_KEY is required when web_backend='parallel'")
         items, artifact = parallel_search(query, date_range, key)
     elif backend == "parallel-mcp":
+        # The MCP client is not behind the http.request proxy seam, so it
+        # never receives the proxy-lane placeholder.
         items, artifact = parallel_mcp.search(
-            query, date_range, config.get("PARALLEL_API_KEY")
+            query, date_range, proxy.real_key(config.get("PARALLEL_API_KEY"))
         )
     elif backend == "keyless":
         items, artifact = web_search_keyless.keyless_search(query, date_range, config)

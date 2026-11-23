@@ -18,6 +18,21 @@ _HEBREW_RE = re.compile(r'[\u0590-\u05FF]')
 
 DISCOVERY_SOURCE_ORDER = ("reddit", "hackernews", "digg", "x")
 
+# Installed/opted-in lanes that can be backfilled into a host plan.
+HOST_PLAN_BACKFILL_SOURCES = (
+    "digg",
+    "arxiv",
+    "techmeme",
+    "bluesky",
+    "truthsocial",
+    "stocktwits",
+    "linkedin",
+    "dripstack",
+    "devto",
+    "telegram",
+    "trustpilot",
+)
+
 
 def detect_language(text: str) -> str | None:
     """Return 'he' if the text contains Hebrew characters, else None."""
@@ -148,6 +163,7 @@ SOURCE_CAPABILITIES = {
     "devto": {"discussion", "link", "reference"},
     "bluesky": {"discussion", "social"},
     "truthsocial": {"discussion", "social"},
+    "linkedin": {"discussion", "social"},
     "polymarket": {"market"},
     "stocktwits": {"social", "market", "finance_social"},
     "dripstack": {"reference", "analysis", "link"},
@@ -259,6 +275,17 @@ def validate_external_plan(raw: dict) -> None:
         raise ValueError("person_identity_anchors must be an array of non-empty strings")
     polymarket_hints(raw.get("polymarket_hints"))
 
+    omit_sources = raw.get("omit_sources", [])
+    if not isinstance(omit_sources, list) or not all(
+        isinstance(source, str) and source in HOST_PLAN_BACKFILL_SOURCES
+        for source in omit_sources
+    ):
+        raise ValueError(
+            "omit_sources must be an array of source names eligible for host-plan backfill: "
+            + ", ".join(HOST_PLAN_BACKFILL_SOURCES)
+        )
+    omitted = set(omit_sources)
+
     source_weights = raw.get("source_weights")
     if source_weights is not None and not isinstance(source_weights, dict):
         raise ValueError("field 'source_weights' must be an object when provided")
@@ -284,6 +311,11 @@ def validate_external_plan(raw: dict) -> None:
             isinstance(source, str) and source.strip() for source in sources
         ):
             raise ValueError(f"subqueries[{index}].sources must be a non-empty string array")
+        if overlap := omitted.intersection(sources):
+            raise ValueError(
+                f"omit_sources conflicts with subqueries[{index}].sources: "
+                + ", ".join(sorted(overlap))
+            )
         weight = subquery.get("weight")
         if weight is not None and (
             isinstance(weight, bool) or not isinstance(weight, (int, float))
@@ -369,25 +401,39 @@ def build_drill_plan(
             for source in schema.candidate_sources(candidate):
                 if source and source not in sources:
                     sources.append(source)
-    if not sources:
-        raise DrillTargetError(target, report.clusters)
-
-    titles: list[str] = []
-    entity_counts: Counter[str] = Counter()
+    cluster_titles: list[str] = []
+    representative_titles: list[str] = []
     for cluster in matched:
-        titles.append(cluster.title)
-        entity_counts.update(entity_extract.extract_text_entities(cluster.title))
+        cluster_titles.append(cluster.title)
         for candidate_id in cluster.representative_ids:
             candidate = candidates.get(candidate_id)
             if candidate:
-                titles.append(candidate.title)
-                entity_counts.update(entity_extract.extract_text_entities(candidate.title))
+                representative_titles.append(candidate.title)
 
+    if schema.report_has_corpus(report):
+        public_titles, public_sources = _public_drill_evidence(matched, candidates)
+        if public_titles:
+            # A cached cluster title may have come from a private representative.
+            cluster_titles = public_titles[:1]
+            representative_titles = public_titles[1:]
+            sources = list(dict.fromkeys(
+                [source for source in sources if source == "corpus" or source in public_sources]
+                + public_sources
+            ))
+        else:
+            sources = ["corpus"] if "corpus" in sources else []
+
+    if not sources:
+        raise DrillTargetError(target, report.clusters)
+
+    entity_counts: Counter[str] = Counter()
+    for title in [*cluster_titles, *representative_titles]:
+        entity_counts.update(entity_extract.extract_text_entities(title))
     queries: list[str] = []
     for query_text in [
-        " ".join(titles[: len(matched)]),
+        " ".join(cluster_titles),
         " ".join(entity for entity, _ in entity_counts.most_common(8)),
-        *titles[len(matched):],
+        *representative_titles,
     ]:
         query_text = " ".join(query_text.split()).strip()
         if query_text and query_text.lower() not in {item.lower() for item in queries}:
@@ -414,6 +460,7 @@ def build_drill_plan(
         cluster_mode=report.query_plan.cluster_mode,
         raw_topic=report.topic,
         person_identity_anchors=list(report.query_plan.person_identity_anchors),
+        person_run=report.query_plan.person_run,
         polymarket_hints=copy.deepcopy(report.query_plan.polymarket_hints),
         subqueries=subqueries,
         source_weights={
@@ -425,6 +472,31 @@ def build_drill_plan(
             "drill-targets:" + ",".join(cluster.cluster_id for cluster in matched),
         ],
     )
+
+
+def _public_drill_evidence(
+    clusters: list[schema.Cluster],
+    candidates: dict[str, schema.Candidate],
+) -> tuple[list[str], list[str]]:
+    titles: list[str] = []
+    sources: list[str] = []
+    for cluster in clusters:
+        for candidate_id in dict.fromkeys([*cluster.representative_ids, *cluster.candidate_ids]):
+            candidate = candidates.get(candidate_id)
+            if candidate is None:
+                continue
+            if schema.candidate_has_corpus(candidate):
+                # A fused candidate can retain public members even when its
+                # chosen title or snippet belongs to a local file.
+                for item in candidate.source_items:
+                    if item.source and item.source != "corpus" and item.title.strip():
+                        titles.append(item.title)
+                        sources.append(item.source)
+            elif candidate.title.strip() and schema.candidate_sources(candidate):
+                titles.append(candidate.title)
+                sources.extend(schema.candidate_sources(candidate))
+    return titles, list(dict.fromkeys(sources))
+
 
 def plan_query(
     *,
@@ -919,7 +991,7 @@ _HOST_FILLER = frozenset(
 _GENERIC_HOST = frozenset("ai agent agents bot bots tool tools app apps assistant llm model".split())
 
 _DEVICE = r"(?:my|the|your|our)\s+(?:own\s+)?(?:computer|mac|pc|desktop|laptop|browser|screen|phone|terminal)s?\b"
-# Mirrors the hosted worker's detect_enablement_intent (last30days-com).
+# Mirrors the hosted service worker's detect_enablement_intent.
 # A tool acting on a device the person owns: "grok bot control my computer",
 # "agent that automates the browser". Plain "use the browser" is ordinary use.
 _ENABLEMENT_TARGET_RE = re.compile(
