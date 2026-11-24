@@ -16,10 +16,22 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import (
+    HTTPDefaultErrorHandler,
+    HTTPErrorProcessor,
+    HTTPHandler,
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    OpenerDirector,
+    ProxyHandler,
+    Request,
+    UnknownHandler,
+    getproxies,
+)
 
-from . import brightdata, health
-from .private_files import write_private_text
+from . import brightdata, health, providers
+from .private_files import replace_private_text, write_private_text
 
 logger = logging.getLogger(__name__)
 
@@ -619,13 +631,23 @@ def _env_line_key(stripped: str) -> str:
     return _env.env_line_key(stripped.split("=", 1)[0])
 
 
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# All characters that Python's str.splitlines() splits on.
+_ENV_LINE_BREAKS_RE = re.compile(r"[\r\n\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+# Line breaks plus NUL are disallowed in persisted secret values.
+_ENV_DISALLOWED_KEY_CHARS_RE = re.compile(r"[\x00\r\n\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+
+
 def _replace_env_line(env_path: Path, content: str, key_name: str, value: str) -> bool:
     """Rewrite every ``key_name=`` line of ``content`` with ``value`` as a 0o600 secret.
 
-    The new file is written to a sibling temp path opened at 0o600 and moved
-    over the original, so the secret never has a readable window and a
+    The new file is written to an owner-only sibling temp path and atomically
+    moved over the original, so the secret never has a readable window and a
     crash mid-write leaves the old file intact.
     """
+    if not isinstance(key_name, str) or not _ENV_KEY_RE.fullmatch(key_name):
+        return False
+
     def _is_key(stripped: str) -> bool:
         return bool(
             stripped and not stripped.startswith("#") and "=" in stripped
@@ -652,11 +674,7 @@ def _replace_env_line(env_path: Path, content: str, key_name: str, value: str) -
         lines.append(line)
     if not replaced:
         lines.append(new_line)
-    tmp_path = env_path.with_name(env_path.name + ".tmp")
-    fd = os.open(tmp_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    os.replace(tmp_path, env_path)
+    replace_private_text(env_path, "\n".join(lines) + "\n")
     try:
         os.chmod(env_path, 0o600)
     except OSError:
@@ -669,15 +687,21 @@ def _format_env_value(value: str) -> str:
 
     env.load_env_file strips a single layer of matching surrounding quotes but
     does NOT process backslash escapes, so we wrap (never escape):
-      - plain tokens (no whitespace, no leading quote): returned unchanged;
-      - values with whitespace/leading quote and no double-quote: double-quoted;
+      - plain tokens (no whitespace, no leading quote or ``#``): returned unchanged;
+      - values with whitespace/leading quote/``#`` and no double-quote: double-quoted;
       - values containing a double-quote but no single-quote: single-quoted;
       - values containing both quote types: returned as-is (best effort; no
         wrapper round-trips through the loader, and tokens never hit this).
-    Newlines are not valid in a single-line env value and are stripped.
+    All characters split by ``str.splitlines()`` and NUL are removed/collapsed
+    so a single value can never inject a second ``KEY=value`` line.
     """
-    value = value.replace("\r", "").replace("\n", " ")
-    needs_quoting = (not value) or value[0] in ("'", '"') or any(c.isspace() for c in value)
+    value = value.replace("\r", "").replace("\x00", "")
+    value = _ENV_LINE_BREAKS_RE.sub(" ", value)
+    needs_quoting = (
+        (not value)
+        or value[0] in ("'", '"', "#")
+        or any(c.isspace() for c in value)
+    )
     if not needs_quoting:
         return value
     if '"' not in value:
@@ -715,6 +739,8 @@ def write_setup_config(
     Returns:
         True if config was written successfully, False on error.
     """
+    if not env_path:
+        return False
     try:
         env_path = Path(env_path)
         env_path.parent.mkdir(parents=True, exist_ok=True)
@@ -735,7 +761,7 @@ def write_setup_config(
         existing_keys: set = set()
         existing_content = ""
         if env_path.exists():
-            existing_content = env_path.read_text(encoding="utf-8")
+            existing_content = env_path.read_text(encoding="utf-8-sig")
             for line in existing_content.splitlines():
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#") and "=" in stripped:
@@ -791,9 +817,16 @@ def write_api_key(
 
     Returns:
         True if the key was written or already present, False on error or when
-        ``api_key`` is empty.
+        ``api_key`` is empty or malformed.
     """
-    if not api_key:
+    if (
+        not env_path
+        or not api_key
+        or not isinstance(api_key, str)
+        or not isinstance(key_name, str)
+        or not _ENV_KEY_RE.fullmatch(key_name)
+        or _ENV_DISALLOWED_KEY_CHARS_RE.search(api_key)
+    ):
         return False
     try:
         env_path = Path(env_path)
@@ -801,7 +834,7 @@ def write_api_key(
 
         existing_content = ""
         if env_path.exists():
-            existing_content = env_path.read_text(encoding="utf-8")
+            existing_content = env_path.read_text(encoding="utf-8-sig")
             for line in existing_content.splitlines():
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#") and "=" in stripped:
@@ -1112,6 +1145,180 @@ def _device_base() -> str:
 # or key-shaped value (e.g. a returning-account server response) is never
 # mislabeled as a device code or leaked to stdout/clipboard.
 _DEVICE_CODE_RE = re.compile(r"^[0-9A-Z]{4}-[0-9A-Z]{4}$")
+_AUTH_HEADER_RE = re.compile(r"\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+_GITHUB_TOKEN_RE = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b"
+)
+_SECRET_FIELD_NAMES = frozenset(
+    {
+        "access_token",
+        "refresh_token",
+        "api_key",
+        "apikey",
+        "token",
+        "secret",
+        "authorization",
+        "password",
+        "cookie",
+    }
+)
+_SAFE_ERROR_SUMMARY_KEYS = ("error", "error_description", "message", "detail")
+_SECRET_FIELD_RE = re.compile(
+    r"""(["']?(?:access_token|refresh_token|api_key|apikey|token|secret|authorization|password|cookie)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}&;]+)""",
+    re.IGNORECASE,
+)
+_UNCLOSED_SECRET_QUOTE_RE = re.compile(
+    r"""["']?(?:access_token|refresh_token|api_key|apikey|token|secret|authorization|password|cookie)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*\\?$|'(?:\\.|[^'\\])*\\?$)""",
+    re.IGNORECASE,
+)
+_URL_USERINFO_RE = re.compile(r"(https?://)[^\s/?#]+@", re.IGNORECASE)
+_MAX_DEVICE_RESPONSE_BYTES = 64 * 1024
+
+
+class _DeviceNoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if fp is not None:
+            try:
+                fp.close()
+            except Exception:
+                pass
+        raise HTTPError(
+            req.full_url,
+            403,
+            "redirect refused for device auth endpoint",
+            headers,
+            None,
+        )
+
+
+def _build_device_opener(*, loopback_http: bool = False) -> OpenerDirector:
+    """Build a no-redirect opener for device-auth endpoints.
+
+    Omits FileHandler, FTPHandler, and DataHandler. Remote targets are HTTPS-only
+    (honoring only the ``https`` proxy entry); loopback HTTP test targets bypass
+    ambient proxies directly.
+    """
+    opener = OpenerDirector()
+    if loopback_http:
+        handlers = [
+            ProxyHandler({}),
+            UnknownHandler(),
+            HTTPHandler(),
+            HTTPDefaultErrorHandler(),
+            _DeviceNoRedirectHandler(),
+            HTTPErrorProcessor(),
+        ]
+    else:
+        https_proxy = getproxies().get("https")
+        proxies = {"https": https_proxy} if https_proxy else {}
+        handlers = [
+            ProxyHandler(proxies),
+            UnknownHandler(),
+            HTTPSHandler(),
+            HTTPDefaultErrorHandler(),
+            _DeviceNoRedirectHandler(),
+            HTTPErrorProcessor(),
+        ]
+    for handler in handlers:
+        opener.add_handler(handler)
+    return opener
+
+
+def _default_urlopen(req: Request, timeout: int = 15):
+    url = getattr(req, "full_url", None) or str(req)
+    if not isinstance(url, str) or not url or url != url.strip():
+        raise URLError("unsupported URL scheme: <empty>")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        raise URLError("unsupported URL control characters")
+    try:
+        parts = urlsplit(url)
+    except ValueError as exc:
+        raise URLError(f"invalid URL: {exc}") from exc
+    scheme = parts.scheme.lower()
+    if scheme == "https" and parts.hostname:
+        return _build_device_opener(loopback_http=False).open(req, timeout=timeout)
+    if scheme == "http" and providers.is_loopback_http_endpoint(url):
+        return _build_device_opener(loopback_http=True).open(req, timeout=timeout)
+    raise URLError(f"unsupported URL scheme or non-loopback http: {scheme or '<empty>'}")
+
+
+# Sole test compatibility seam for patches targeting ``lib.setup_wizard.urlopen``;
+# production requests always use the dedicated no-redirect opener above and never
+# delegate to ``urllib.request.urlopen``.
+urlopen = _default_urlopen
+
+
+def _open_device_request(req: Request, *, timeout: int = 15):
+    return urlopen(req, timeout=timeout)
+
+
+def _close_http_error(exc: HTTPError) -> None:
+    close = getattr(exc, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _read_bounded_json_dict(resp: Any) -> Optional[Dict[str, Any]]:
+    try:
+        raw = resp.read(_MAX_DEVICE_RESPONSE_BYTES + 1)
+    except TypeError:
+        raw = resp.read()
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) > _MAX_DEVICE_RESPONSE_BYTES:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _is_valid_verification_uri(uri: Any) -> bool:
+    """Return True only for exact HTTPS ``github.com`` device-login verification URIs."""
+    if not isinstance(uri, str) or not uri:
+        return False
+    if "\\" in uri or any(ord(ch) <= 0x20 or ord(ch) >= 0x7F for ch in uri):
+        return False
+    try:
+        parts = urlsplit(uri)
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme != "https":
+        return False
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        return False
+    if port not in (None, 443):
+        return False
+    if (parts.hostname or "").lower() != "github.com":
+        return False
+    if parts.query or parts.fragment or "?" in uri or "#" in uri:
+        return False
+    path = parts.path
+    if path != "/login/device" and not path.startswith("/login/device/"):
+        return False
+    lowered_path = path.lower()
+    if ".." in path.split("/") or "%2e" in lowered_path or "%2f" in lowered_path or "%5c" in lowered_path:
+        return False
+    return True
+
+
+def _scrub_error_text(text: str, *, secrets: Tuple[str, ...] = ()) -> str:
+    """Redact known secrets, bearer tokens, and URL credentials from error text."""
+    scrubbed = text
+    for secret in secrets:
+        if not isinstance(secret, str):
+            continue
+        for candidate in {secret, secret.strip()}:
+            if candidate and candidate.strip():
+                scrubbed = scrubbed.replace(candidate, "[REDACTED]")
+    scrubbed = _URL_USERINFO_RE.sub(r"\1", scrubbed)
+    scrubbed = _AUTH_HEADER_RE.sub(r"\1 [REDACTED]", scrubbed)
+    scrubbed = _GITHUB_TOKEN_RE.sub("[REDACTED]", scrubbed)
+    scrubbed = _SECRET_FIELD_RE.sub(r'\1"[REDACTED]"', scrubbed)
+    return scrubbed
 
 
 def _existing_scrapecreators_key() -> Optional[str]:
@@ -1154,10 +1361,20 @@ def run_device_auth() -> Optional[Tuple[str, str, str, int]]:
         body = json.dumps({}).encode()
         req = Request(f"{_device_base()}/code", data=body, method="POST")
         req.add_header("Content-Type", "application/json")
-        with urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-    except (HTTPError, URLError, OSError) as exc:
-        logger.warning("Device auth code request failed: %s", exc)
+        with _open_device_request(req, timeout=15) as resp:
+            data = _read_bounded_json_dict(resp)
+    except HTTPError as exc:
+        try:
+            logger.warning("Device auth code request failed: %s", _scrub_error_text(str(exc)))
+        finally:
+            _close_http_error(exc)
+        return None
+    except (URLError, OSError) as exc:
+        logger.warning("Device auth code request failed: %s", _scrub_error_text(str(exc)))
+        return None
+
+    if data is None:
+        logger.warning("Device auth code request returned invalid or oversized JSON.")
         return None
 
     device_code = data.get("device_code")
@@ -1173,7 +1390,13 @@ def run_device_auth() -> Optional[Tuple[str, str, str, int]]:
         )
         return None
 
-    return (device_code, user_code, verification_uri or "", interval)
+    if verification_uri is None:
+        verification_uri = ""
+    elif verification_uri != "" and not _is_valid_verification_uri(verification_uri):
+        logger.warning("Device auth returned an untrusted verification_uri; aborting.")
+        return None
+
+    return (device_code, user_code, verification_uri, interval)
 
 
 def poll_device_auth(
@@ -1227,15 +1450,26 @@ def poll_device_auth(
             body = json.dumps({"device_code": device_code}).encode()
             req = Request(f"{_device_base()}/token", data=body, method="POST")
             req.add_header("Content-Type", "application/json")
-            with urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read())
+            with _open_device_request(req, timeout=15) as resp:
+                data = _read_bounded_json_dict(resp)
         except HTTPError as exc:
-            if exc.code in (400, 403, 428):
-                continue
-            logger.warning("Device auth poll error: %s", exc)
-            return None
+            try:
+                reason = str(getattr(exc, "reason", "") or "").lower()
+                if exc.code in (400, 403, 428) and "redirect refused" not in reason:
+                    continue
+                logger.warning(
+                    "Device auth poll error: %s",
+                    _scrub_error_text(str(exc), secrets=(device_code,)),
+                )
+                return None
+            finally:
+                _close_http_error(exc)
         except (URLError, OSError):
             continue
+
+        if data is None:
+            logger.warning("Device auth poll returned invalid or oversized JSON.")
+            return None
 
         if data.get("access_token"):
             return data["access_token"]
@@ -1259,22 +1493,98 @@ _PROFILE_FETCH_RETRY_SLEEP_S = 1.0
 _PROFILE_ERROR_BODY_LIMIT = 200
 
 
-def _http_error_detail(exc: HTTPError, *, body_limit: int = _PROFILE_ERROR_BODY_LIMIT) -> str:
-    """Build a diagnosable HTTPError string including a truncated body.
+_PROFILE_ERROR_READ_LIMIT = 65536
 
-    The body is capped and never treated as a secret source of truth; callers
-    still must not log bearer tokens. Used so a 5xx is not a black box.
+
+_MAX_JSON_REDACT_DEPTH = 8
+
+
+def _redact_json_value(
+    value: Any,
+    *,
+    secrets: Tuple[str, ...] = (),
+    depth: int = 0,
+) -> Any:
+    """Recursively redact sensitive keys/names and scrub string values in parsed JSON."""
+    if depth >= _MAX_JSON_REDACT_DEPTH:
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for k, v in value.items():
+            is_secret_key = isinstance(k, str) and k.strip().lower() in _SECRET_FIELD_NAMES
+            safe_key = _scrub_error_text(str(k), secrets=secrets)
+            redacted[safe_key] = (
+                "[REDACTED]"
+                if is_secret_key
+                else _redact_json_value(v, secrets=secrets, depth=depth + 1)
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_json_value(item, secrets=secrets, depth=depth + 1) for item in value]
+    if isinstance(value, str):
+        return _scrub_error_text(value, secrets=secrets)
+    return value
+
+
+def _http_error_detail(
+    exc: HTTPError,
+    *,
+    body_limit: int = _PROFILE_ERROR_BODY_LIMIT,
+    secrets: Tuple[str, ...] = (),
+) -> str:
+    """Build a diagnosable HTTPError string including a scrubbed, truncated body.
+
+    JSON dict bodies are parsed, recursively redacted (keys and values), and
+    reduced to safe summary fields before serialization. Deeply nested JSON
+    that triggers ``RecursionError`` or non-JSON bodies with unclosed secret
+    quotes fall back to the scrubbed HTTP status/reason alone.
     """
-    base = f"HTTP Error {exc.code}: {getattr(exc, 'reason', '') or ''}".rstrip(": ")
+    base = _scrub_error_text(
+        f"HTTP Error {exc.code}: {getattr(exc, 'reason', '') or ''}".rstrip(": "),
+        secrets=secrets,
+    )
     try:
-        raw = exc.read() or b""
+        try:
+            raw = exc.read(_PROFILE_ERROR_READ_LIMIT) or b""
+        except TypeError:
+            raw = exc.read() or b""
     except Exception:
         return base
+    finally:
+        _close_http_error(exc)
     if not raw:
         return base
     text = raw.decode("utf-8", errors="replace").strip()
     if not text:
         return base
+    try:
+        parsed = json.loads(text)
+    except RecursionError:
+        return base
+    except (json.JSONDecodeError, ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, (dict, list)):
+        try:
+            redacted = _redact_json_value(parsed, secrets=secrets)
+            if isinstance(redacted, dict):
+                summary = {
+                    key: redacted[key]
+                    for key in _SAFE_ERROR_SUMMARY_KEYS
+                    if key in redacted
+                }
+                payload = summary or redacted
+            else:
+                payload = redacted
+            text = _scrub_error_text(
+                json.dumps(payload, ensure_ascii=False),
+                secrets=secrets,
+            )
+        except (RecursionError, ValueError, TypeError):
+            return base
+    else:
+        if _UNCLOSED_SECRET_QUOTE_RE.search(text):
+            return base
+        text = _scrub_error_text(text, secrets=secrets)
     if len(text) > body_limit:
         text = text[:body_limit] + "…"
     return f"{base} body={text!r}"
@@ -1298,6 +1608,18 @@ def fetch_api_key(access_token: str) -> Dict[str, Any]:
       - ``{"ok": False, "reason": "request_failed", "detail": str}`` on
         network/OS failures
     """
+    if (
+        not isinstance(access_token, str)
+        or not access_token.strip()
+        or any(ord(ch) < 0x20 or ord(ch) >= 0x7F for ch in access_token)
+    ):
+        logger.warning("Failed to fetch API key: invalid access token")
+        return {
+            "ok": False,
+            "reason": "request_failed",
+            "detail": "Invalid access token",
+        }
+
     data: Optional[Dict[str, Any]] = None
     last_upstream: Optional[Dict[str, Any]] = None
 
@@ -1305,12 +1627,23 @@ def fetch_api_key(access_token: str) -> Dict[str, Any]:
         try:
             req = Request(f"{_device_base()}/profile")
             req.add_header("Authorization", f"Bearer {access_token}")
-            with urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read())
+            with _open_device_request(req, timeout=15) as resp:
+                data = _read_bounded_json_dict(resp)
+            if data is None:
+                logger.warning("Failed to fetch API key: invalid or oversized JSON response")
+                return {
+                    "ok": False,
+                    "reason": "request_failed",
+                    "detail": "Invalid or oversized profile response",
+                }
             break
         except HTTPError as exc:
-            detail = _http_error_detail(exc)
-            if 500 <= int(exc.code) <= 599:
+            try:
+                detail = _http_error_detail(exc, secrets=(access_token,))
+                status_code = int(exc.code)
+            finally:
+                _close_http_error(exc)
+            if 500 <= status_code <= 599:
                 logger.warning(
                     "Device auth /profile upstream error (attempt %s/%s): %s",
                     attempt + 1,
@@ -1320,7 +1653,7 @@ def fetch_api_key(access_token: str) -> Dict[str, Any]:
                 last_upstream = {
                     "ok": False,
                     "reason": "upstream_error",
-                    "http_status": int(exc.code),
+                    "http_status": status_code,
                     "detail": detail,
                 }
                 if attempt + 1 < _PROFILE_FETCH_ATTEMPTS:
@@ -1331,12 +1664,20 @@ def fetch_api_key(access_token: str) -> Dict[str, Any]:
             return {
                 "ok": False,
                 "reason": "http_error",
-                "http_status": int(exc.code),
+                "http_status": status_code,
                 "detail": detail,
             }
         except (URLError, OSError) as exc:
-            logger.warning("Failed to fetch API key: %s", exc)
-            return {"ok": False, "reason": "request_failed", "detail": str(exc)}
+            detail = _scrub_error_text(str(exc), secrets=(access_token,))
+            logger.warning("Failed to fetch API key: %s", detail)
+            return {"ok": False, "reason": "request_failed", "detail": detail}
+        except ValueError:
+            logger.warning("Failed to fetch API key: invalid request configuration")
+            return {
+                "ok": False,
+                "reason": "request_failed",
+                "detail": "Invalid request configuration",
+            }
 
     if data is None:
         # Defensive: loop exited without success or an explicit return.
@@ -1415,12 +1756,24 @@ def _start_device_flow() -> "Tuple[Dict[str, Any], Optional[Dict[str, Any]]]":
     # Validate the code shape BEFORE copying, labeling, or emitting it. A
     # non-conforming user_code (e.g. a key-shaped value) is never surfaced as a
     # GitHub device code; we stop rather than instruct the user to paste garbage.
-    if not _DEVICE_CODE_RE.match(user_code):
+    if not isinstance(user_code, str) or not _DEVICE_CODE_RE.match(user_code):
         logger.warning("Device auth returned a non-device-shaped user_code; aborting.")
         return (
             {
                 "status": "error",
                 "message": "ScrapeCreators returned an unexpected device-code format.",
+            },
+            None,
+        )
+
+    if verification_uri is None:
+        verification_uri = ""
+    if verification_uri != "" and not _is_valid_verification_uri(verification_uri):
+        logger.warning("Device auth returned an untrusted verification_uri; aborting.")
+        return (
+            {
+                "status": "error",
+                "message": "ScrapeCreators returned an unexpected verification URI.",
             },
             None,
         )

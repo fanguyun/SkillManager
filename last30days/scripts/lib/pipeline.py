@@ -2361,6 +2361,10 @@ def run(
     shortform_urls: shortform_envelope.Envelope | None = None,
 ) -> schema.Report:
     _check_research(config)
+    # Isolate run-scoped mutations (_financial_topic, envelopes, resolved
+    # endpoints, lane budgets) from the caller's dict so concurrent callers
+    # (comparison fan-out, discovery enrichment) never race or leak state.
+    config = dict(config)
     if external_plan is not None:
         planner.validate_external_plan(external_plan)
         config = with_plan_source_omissions(config, external_plan)
@@ -7301,12 +7305,17 @@ def _retrieve_stream_impl(
         lane_paths: dict[str, str] = {}
         # The consented logged-in session, when its gate passes (read once per
         # run; None otherwise). Its budget is spent per entity.
-        lane_session = reddit_session.session_for(config, topic=raw_topic or reddit_query)
+        lane_topic = raw_topic or reddit_query
+        lane_session = reddit_session.session_for(config, topic=lane_topic)
+        if "_reddit_named_subreddits" in config:
+            lane_named = reddit_session.named_subreddits("", config.get("_reddit_named_subreddits") or ())
+        else:
+            lane_named = reddit_session.named_subreddits(lane_topic, dedicated_subreddits or ())
         try:
             with reddit_keyless.lane_deadline(lane_deadline), \
                     reddit_keyless.lane_notes() as lane_notes, \
                     reddit_keyless.lane_paths() as lane_paths, \
-                    reddit_session.lane(lane_session, raw_topic or reddit_query), \
+                    reddit_session.lane(lane_session, lane_topic, named=lane_named), \
                     reddit_envelope.lane(config.get("_reddit_envelope"), subquery.label):
                 public_results = reddit_public.search_reddit_public(
                     reddit_query, from_date, to_date, depth=depth,

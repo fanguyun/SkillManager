@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "798ce90d-f4a2-4d35-b4da-a3b929a1de92",
+  "path": "leader",
+  "path_key": "leader",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/KKKKhazix/khazix-skills/tree/main/leader",
+    "subpath": "leader",
+    "branch": "main"
+  }
+}

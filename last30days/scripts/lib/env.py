@@ -7,6 +7,7 @@ import json
 import locale
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,6 +126,7 @@ class ConfigLoadPolicy:
     allow_project_config: bool = False
     inspect_ignored_project_config: bool = False
     require_recorded_browser_consent: bool = False
+    load_secret_stores: bool = True
 
 
 def _truthy(value: Any) -> bool:
@@ -283,11 +285,81 @@ def env_line_key(lhs: str) -> str:
     return key[match.end():] if match else key
 
 
-def load_env_file(path: Path) -> dict[str, str]:
+_MAX_ENV_FILE_BYTES = 256 * 1024
+_ENV_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _is_symlink_or_junction(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    return bool(isjunction and isjunction(path))
+
+
+def load_env_file(
+    path: Path,
+    *,
+    allow_symlink: bool = True,
+    strict_keys: bool = False,
+) -> dict[str, str]:
     """Load environment variables from a file."""
-    env = {}
-    if not path or not path.exists():
+    env: dict[str, str] = {}
+    if not path:
         return env
+    if not allow_symlink and (
+        _is_symlink_or_junction(path) or _is_symlink_or_junction(path.parent)
+    ):
+        return env
+
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    if not allow_symlink:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = -1
+    parent_fd = -1
+    try:
+        if (
+            not allow_symlink
+            and path.name
+            and os.open in os.supports_dir_fd
+            and hasattr(os, "O_DIRECTORY")
+            and hasattr(os, "O_NOFOLLOW")
+        ):
+            parent_fd = os.open(
+                path.parent,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            fd = os.open(path.name, flags, dir_fd=parent_fd)
+        else:
+            fd = os.open(path, flags)
+    except OSError:
+        return env
+    finally:
+        if parent_fd >= 0:
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
+
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > _MAX_ENV_FILE_BYTES:
+            return env
+        handle = os.fdopen(fd, "rb")
+        fd = -1
+        with handle:
+            raw = handle.read(_MAX_ENV_FILE_BYTES + 1)
+    except OSError:
+        return env
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    if len(raw) > _MAX_ENV_FILE_BYTES:
+        return env
+
     _check_file_permissions(path)
 
     # Prefer UTF-8 (utf-8-sig transparently strips a BOM written by Windows
@@ -296,9 +368,9 @@ def load_env_file(path: Path) -> dict[str, str]:
     # keeps loading. If it decodes as neither, let UnicodeDecodeError surface
     # rather than corrupting keys/secrets with replacement characters.
     try:
-        text = path.read_text(encoding='utf-8-sig')
+        text = raw.decode('utf-8-sig')
     except UnicodeDecodeError:
-        text = path.read_text(encoding=locale.getpreferredencoding(False))
+        text = raw.decode(locale.getpreferredencoding(False))
 
     for line in text.splitlines():
         line = line.strip()
@@ -307,6 +379,8 @@ def load_env_file(path: Path) -> dict[str, str]:
         if '=' in line:
             key, _, value = line.partition('=')
             key = env_line_key(key)
+            if strict_keys and not _ENV_IDENT_RE.fullmatch(key):
+                continue
             value = _strip_inline_comment(value).strip()
             # Remove quotes if present
             if value and value[0] in ('"', "'") and value[-1] == value[0]:
@@ -449,11 +523,12 @@ def _load_pass(keys: list[str], prefix: str) -> dict[str, str]:
     looked up at pass path ``f"{prefix}{key}"`` — mirroring Keychain's
     ``last30days-<key>`` service-name convention — so any user stores keys under
     that namespace without editing code (prefix overridable via
-    ``LAST30DAYS_PASS_PREFIX``). The secret is decrypted in a subprocess and
-    read from stdout's first line (pass keeps the secret there; any metadata
-    follows) — never written to disk, never logged. Honors ``PASSWORD_STORE_DIR``.
-    Missing entries and failures are silent: pass is a lowest-priority, additive
-    source like Keychain, so an explicit .env or process-env value still wins.
+    ``LAST30DAYS_PASS_PREFIX``, used verbatim to match ``setup-pass.sh``). The
+    secret is decrypted in a subprocess and read from stdout's first line (pass
+    keeps the secret there; any metadata follows) — never written to disk, never
+    logged. Honors ``PASSWORD_STORE_DIR``. Missing entries and failures are
+    silent: pass is a lowest-priority, additive source like Keychain, so an
+    explicit .env or process-env value still wins.
     """
     import shutil
     pass_bin = shutil.which("pass")
@@ -465,7 +540,7 @@ def _load_pass(keys: list[str], prefix: str) -> dict[str, str]:
     for key in keys:
         try:
             result = subprocess.run(
-                [pass_bin, "show", f"{prefix}{key}"],
+                [pass_bin, "show", "--", f"{prefix}{key}"],
                 capture_output=True, text=True, timeout=5,
                 encoding="utf-8", errors="replace",
             )
@@ -503,12 +578,20 @@ def _find_project_env() -> Path | None:
 
     Searches for .claude/last30days.env in each parent directory,
     stopping at the git root, user's home directory, or filesystem root.
+    Rejects symlinks, junctions, and non-regular files so an untrusted
+    repository cannot redirect config reads outside the project tree.
     """
     cwd = Path.cwd()
     for parent in [cwd, *cwd.parents]:
-        candidate = parent / '.claude' / 'last30days.env'
-        if candidate.exists():
-            return candidate
+        claude_dir = parent / '.claude'
+        candidate = claude_dir / 'last30days.env'
+        if not _is_symlink_or_junction(claude_dir) and not _is_symlink_or_junction(candidate):
+            try:
+                st = candidate.lstat()
+            except OSError:
+                st = None
+            if st is not None and stat.S_ISREG(st.st_mode):
+                return candidate
         if (parent / ".git").exists():
             break
         # Stop at filesystem root or home
@@ -522,7 +605,7 @@ def _load_config_files(
 ) -> tuple[dict[str, str], dict[str, str], Path | None]:
     file_env = load_env_file(CONFIG_FILE) if CONFIG_FILE else {}
     project_path = _find_project_env() if _project_config_trusted(policy, file_env) else None
-    project_env = load_env_file(project_path) if project_path else {}
+    project_env = load_env_file(project_path, allow_symlink=False) if project_path else {}
     return file_env, project_env, project_path
 
 
@@ -583,33 +666,43 @@ def get_config(policy: ConfigLoadPolicy | None = None) -> dict[str, Any]:
     if policy.inspect_ignored_project_config and not _project_config_trusted(policy, file_env):
         ignored_project_env_path = _find_project_env()
         if ignored_project_env_path:
-            ignored_project_keys = sorted(load_env_file(ignored_project_env_path).keys())
+            ignored_project_keys = sorted(
+                load_env_file(
+                    ignored_project_env_path,
+                    allow_symlink=False,
+                    strict_keys=True,
+                ).keys()
+            )
 
     # Merge file sources: project > global
     merged_env = {**file_env, **project_env}
 
-    # Keychain is the lowest-priority source (Darwin only; no-op elsewhere).
-    # Loaded before openai_auth so OPENAI_API_KEY can come from Keychain too.
-    keychain_aliases_raw = os.environ.get(KEYCHAIN_ALIASES_ENV) or merged_env.get(KEYCHAIN_ALIASES_ENV)
-    keychain_aliases = _parse_keychain_aliases(keychain_aliases_raw)
-    keychain_env = _load_keychain(list(KEYCHAIN_KEYS), keychain_aliases)
-    merged_env = {**keychain_env, **merged_env}
-    # pass(1) store: Linux/Unix analog of Keychain at convention path
-    # {prefix}<KEY>. Decrypts transiently so secrets stay encrypted at rest (no
-    # plaintext .env). Lowest priority: Keychain, the config files, and process
-    # env all win over it. Two efficiency guards so a user who merely has `pass`
-    # on PATH doesn't pay for it: resolve the prefix from the loaded config/env
-    # (not import time, so a .env-set LAST30DAYS_PASS_PREFIX is honored), and
-    # probe ONLY keys still unset after the higher-priority sources — an empty
-    # list short-circuits with no gpg/pinentry calls at all.
-    pass_prefix = (
-        os.environ.get("LAST30DAYS_PASS_PREFIX")
-        or merged_env.get("LAST30DAYS_PASS_PREFIX")
-        or DEFAULT_PASS_PATH_PREFIX
-    )
-    pass_missing = [k for k in KEYCHAIN_KEYS if k not in os.environ and not merged_env.get(k)]
-    pass_env = _load_pass(pass_missing, pass_prefix)
-    merged_env = {**pass_env, **merged_env}
+    # Keychain and pass(1) are the lowest-priority credential stores. Skip both
+    # when the caller's ConfigLoadPolicy opts out (e.g. offline, mock, invalid,
+    # or hosted-API invocations) so users are never prompted for unused secrets.
+    keychain_env: dict[str, str] = {}
+    pass_env: dict[str, str] = {}
+    if policy.load_secret_stores:
+        keychain_aliases_raw = os.environ.get(KEYCHAIN_ALIASES_ENV) or merged_env.get(KEYCHAIN_ALIASES_ENV)
+        keychain_aliases = _parse_keychain_aliases(keychain_aliases_raw)
+        keychain_env = _load_keychain(list(KEYCHAIN_KEYS), keychain_aliases)
+        merged_env = {**keychain_env, **merged_env}
+        # pass(1) store: Linux/Unix analog of Keychain at convention path
+        # {prefix}<KEY>. Decrypts transiently so secrets stay encrypted at rest (no
+        # plaintext .env). Lowest priority: Keychain, the config files, and process
+        # env all win over it. Two efficiency guards so a user who merely has `pass`
+        # on PATH doesn't pay for it: resolve the prefix from the loaded config/env
+        # (not import time, so a .env-set LAST30DAYS_PASS_PREFIX is honored), and
+        # probe ONLY keys still unset after the higher-priority sources — an empty
+        # list short-circuits with no gpg/pinentry calls at all.
+        pass_prefix = (
+            os.environ.get("LAST30DAYS_PASS_PREFIX")
+            or merged_env.get("LAST30DAYS_PASS_PREFIX")
+            or DEFAULT_PASS_PATH_PREFIX
+        )
+        pass_missing = [k for k in KEYCHAIN_KEYS if k not in os.environ and not merged_env.get(k)]
+        pass_env = _load_pass(pass_missing, pass_prefix)
+        merged_env = {**pass_env, **merged_env}
 
     openai_auth = get_openai_auth(merged_env)
 

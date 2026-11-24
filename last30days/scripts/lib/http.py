@@ -8,6 +8,7 @@ import os
 import random
 import re
 import socket
+import string
 import threading
 import time
 import urllib.error
@@ -17,17 +18,22 @@ from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunparse, urlunsplit, quote
 
 from . import bounded_get, health, proxy, usage
 from . import log as _log
 
 DEFAULT_TIMEOUT = 30
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+MAX_ERROR_BODY_BYTES = 64 * 1024
+
+
+_URL_USERINFO_RE = re.compile(r"(https?://)[^\s/?#]+@", re.IGNORECASE)
 
 
 def log(msg: str):
-    """Log debug message to stderr."""
-    _log.debug(msg)
+    """Log debug message to stderr with any embedded URL userinfo scrubbed."""
+    _log.debug(_URL_USERINFO_RE.sub(r"\1", msg))
 
 
 MAX_RETRIES = 5
@@ -120,10 +126,178 @@ def _request_origin(url: str) -> tuple[str, str, int]:
 # caller that fetches an address from remote content (a sitemap) refuses a
 # redirect to a private network before it is followed, not after.
 _REDIRECT_GUARD_ATTR = "_last30days_redirect_guard"
+_PUBLIC_ONLY_ATTR = "_last30days_public_only"
+_ALLOWED_HTTP_SCHEMES = frozenset({"http", "https"})
+
+
+def _check_http_scheme(url: str) -> str:
+    """Return the normalized scheme for an http(s) URL, or raise ValueError."""
+    if not isinstance(url, str) or not url or url != url.strip():
+        raise ValueError("unsupported URL scheme: <empty>")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        raise ValueError("unsupported URL control characters")
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    if scheme not in _ALLOWED_HTTP_SCHEMES:
+        raise ValueError(f"unsupported URL scheme: {scheme or '<empty>'}")
+    return scheme
+
+
+def _create_public_connection(
+    address: tuple[str, int],
+    timeout: Any = socket._GLOBAL_DEFAULT_TIMEOUT,
+    source_address: Any = None,
+) -> socket.socket:
+    """Resolve ``address`` fresh once and connect only to verified public IPs."""
+    from . import public_host
+
+    host, port = address
+    verified = public_host.resolve_public_addresses(host, port)
+    last_err: Optional[OSError] = None
+    for af, socktype, proto, _canonname, sockaddr in verified:
+        sock = None
+        try:
+            sock = socket.socket(af, socktype, proto)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_err = exc
+            if sock is not None:
+                sock.close()
+    if last_err is not None:
+        raise last_err
+    raise public_host.NonPublicAddressError("refused non-public address")
+
+
+class _PublicHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection pinned to the exact public IP resolved at connect time."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _create_public_connection
+
+    def connect(self):
+        if self._tunnel_host:
+            from . import public_host
+
+            raise public_host.NonPublicAddressError("refused proxied tunnel for public-only request")
+        return super().connect()
+
+
+if hasattr(http.client, "HTTPSConnection"):
+
+    class _PublicHTTPSConnection(http.client.HTTPSConnection):
+        """HTTPSConnection pinned to verified public IPs while preserving TLS SNI/hostname."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._create_connection = _create_public_connection
+
+        def connect(self):
+            if self._tunnel_host:
+                from . import public_host
+
+                raise public_host.NonPublicAddressError("refused proxied tunnel for public-only request")
+            return super().connect()
+
+
+class _PublicHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_PublicHTTPConnection, req)
+
+
+if hasattr(http.client, "HTTPSConnection"):
+
+    class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+def _build_http_opener(
+    *, bypass_proxy: bool = False, public_only: bool = False,
+) -> urllib.request.OpenerDirector:
+    """Build an OpenerDirector restricted strictly to HTTP(S) — omitting urllib's
+    default FileHandler, FTPHandler, and DataHandler."""
+    opener = urllib.request.OpenerDirector()
+    handlers = [
+        urllib.request.ProxyHandler({}) if (bypass_proxy or public_only) else urllib.request.ProxyHandler(),
+        urllib.request.UnknownHandler(),
+        _PublicHTTPHandler() if public_only else urllib.request.HTTPHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        _StripAuthOnCrossOriginRedirect(),
+        urllib.request.HTTPErrorProcessor(),
+    ]
+    if hasattr(http.client, "HTTPSConnection"):
+        handlers.append(_PublicHTTPSHandler() if public_only else urllib.request.HTTPSHandler())
+    for handler in handlers:
+        opener.add_handler(handler)
+    return opener
 
 
 class _StripAuthOnCrossOriginRedirect(urllib.request.HTTPRedirectHandler):
+    def http_error_302(self, req, fp, code, msg, headers):
+        if "location" in headers:
+            newurl = headers["location"]
+        elif "uri" in headers:
+            newurl = headers["uri"]
+        else:
+            return
+        urlparts = urlparse(newurl)
+        if urlparts.scheme not in ("http", "https", ""):
+            raise urllib.error.HTTPError(
+                req.full_url,
+                403,
+                f"redirect refused: unsupported URL scheme: {urlparts.scheme}",
+                headers,
+                fp,
+            )
+        if not urlparts.path and urlparts.netloc:
+            urlparts = list(urlparts)
+            urlparts[2] = "/"
+        newurl = urlunparse(urlparts)
+        newurl = quote(newurl, encoding="iso-8859-1", safe=string.punctuation)
+        newurl = urljoin(req.full_url, newurl)
+        new = self.redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return
+        if hasattr(req, "redirect_dict"):
+            visited = new.redirect_dict = req.redirect_dict
+            if (
+                visited.get(newurl, 0) >= self.max_repeats
+                or len(visited) >= self.max_redirections
+            ):
+                raise urllib.error.HTTPError(
+                    req.full_url, code, self.inf_msg + msg, headers, fp
+                )
+        else:
+            visited = new.redirect_dict = req.redirect_dict = {}
+        visited[newurl] = visited.get(newurl, 0) + 1
+        # Close without calling unbounded fp.read() on untrusted 3xx bodies.
+        if fp is not None:
+            fp.close()
+        return self.parent.open(new, timeout=req.timeout)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            _check_http_scheme(newurl)
+        except ValueError as exc:
+            raise urllib.error.HTTPError(
+                req.full_url, 403, f"redirect refused: {exc}", headers, fp,
+            ) from exc
+        public_only = bool(getattr(req, _PUBLIC_ONLY_ATTR, False))
+        if public_only:
+            from . import public_host
+
+            if not public_host.is_public_address_syntax(newurl):
+                raise urllib.error.HTTPError(
+                    req.full_url, 403, "redirect refused: non-public address", headers, fp,
+                )
         guard = getattr(req, _REDIRECT_GUARD_ATTR, None)
         if guard is not None and not guard(newurl):
             raise urllib.error.HTTPError(
@@ -134,6 +308,8 @@ class _StripAuthOnCrossOriginRedirect(urllib.request.HTTPRedirectHandler):
             return None
         if guard is not None:
             setattr(new, _REDIRECT_GUARD_ATTR, guard)
+        if public_only:
+            setattr(new, _PUBLIC_ONLY_ATTR, True)
         if _request_origin(req.full_url) != _request_origin(new.full_url):
             for store in (new.headers, getattr(new, "unredirected_hdrs", None)):
                 if not store:
@@ -144,18 +320,30 @@ class _StripAuthOnCrossOriginRedirect(urllib.request.HTTPRedirectHandler):
         return new
 
 
-_opener = urllib.request.build_opener(_StripAuthOnCrossOriginRedirect)
-_direct_opener = urllib.request.build_opener(
-    urllib.request.ProxyHandler({}), _StripAuthOnCrossOriginRedirect
-)
+_opener = _build_http_opener(bypass_proxy=False)
+_direct_opener = _build_http_opener(bypass_proxy=True)
+_public_opener = _build_http_opener(bypass_proxy=True, public_only=True)
 _DEFAULT_URLOPEN = urllib.request.urlopen
 
 
 def _open_request(req, timeout, *, bypass_proxy=False):
     """Honor test patches of urllib.request.urlopen; otherwise use the strip opener."""
+    url = getattr(req, "full_url", None) or str(req)
+    try:
+        _check_http_scheme(url)
+    except ValueError as exc:
+        raise urllib.error.URLError(str(exc)) from exc
     current = urllib.request.urlopen
     if current is not _DEFAULT_URLOPEN:
         return current(req, timeout=timeout)
+    if getattr(req, _PUBLIC_ONLY_ATTR, False):
+        from . import public_host
+
+        if not public_host.is_public_address_syntax(url):
+            raise urllib.error.URLError(
+                public_host.NonPublicAddressError("refused non-public address")
+            )
+        return _public_opener.open(req, timeout=timeout)
     opener = _direct_opener if bypass_proxy else _opener
     return opener.open(req, timeout=timeout)
 
@@ -695,6 +883,56 @@ class DeadlineExceeded(HTTPError):
         )
 
 
+class ResponseTooLarge(HTTPError):
+    """An upstream response exceeded the configured byte limit."""
+
+    def __init__(self, message: str):
+        super().__init__(message, outcome_state=health.ERROR)
+
+
+def _content_length(headers) -> Optional[int]:
+    if not headers or not hasattr(headers, "get"):
+        return None
+    raw = headers.get("Content-Length")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _read_bounded(stream, max_bytes: int, *, truncate: bool = False) -> bytes:
+    if not truncate:
+        declared = (
+            stream.length
+            if isinstance(stream, http.client.HTTPResponse)
+            else _content_length(getattr(stream, "headers", None))
+        )
+        if isinstance(declared, int) and not isinstance(declared, bool) and declared > max_bytes:
+            raise ResponseTooLarge(
+                f"Response Content-Length {declared} exceeds limit of {max_bytes} bytes"
+            )
+    limit = max_bytes if truncate else max_bytes + 1
+    data = stream.read(limit)
+    if data is None:
+        return b""
+    if truncate:
+        return data[:max_bytes]
+    if len(data) > max_bytes:
+        raise ResponseTooLarge(f"Response body exceeded limit of {max_bytes} bytes")
+    if (
+        isinstance(stream, http.client.HTTPResponse)
+        and not stream.chunked
+        and getattr(stream, "_method", None) != "HEAD"
+        and isinstance(stream.length, int)
+        and stream.length > 0
+    ):
+        raise http.client.IncompleteRead(data, stream.length)
+    return data
+
+
 @contextmanager
 def capture_failures():
     """Capture terminal request failures in the current retrieval context.
@@ -933,6 +1171,8 @@ def request(
     return_headers: bool = False,
     redirect_guard: Callable[[str], bool] | None = None,
     sensitive_url: bool = False,
+    public_only: bool = False,
+    max_bytes: Optional[int] = None,
 ) -> Union[Dict[str, Any], str, tuple[Union[Dict[str, Any], str], ResponseHeaders]]:
     """Make an HTTP request and return JSON response.
 
@@ -961,6 +1201,9 @@ def request(
             available with owned_get, whose child process reports no headers.
         sensitive_url: Exclude credential-bearing URLs and their responses
             from request diagnostics and fixture capture.
+        max_bytes: Maximum response body size in bytes (defaults to
+            ``MAX_RESPONSE_BYTES``). Oversized responses fail fast with
+            ``ResponseTooLarge``.
 
     Returns:
         Parsed JSON response as dict, or raw text string if raw=True. With
@@ -969,6 +1212,9 @@ def request(
     Raises:
         HTTPError: On request failure
     """
+    if max_bytes is not None and max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+    effective_max_bytes = MAX_RESPONSE_BYTES if max_bytes is None else max_bytes
     if owned_get and (method != "GET" or json_data is not None):
         raise ValueError("owned transport requires a bodyless GET")
     if owned_get and deadline_monotonic is None:
@@ -977,6 +1223,17 @@ def request(
         raise ValueError("owned GET does not support proxy bypass")
     if owned_get and return_headers:
         raise ValueError("owned GET does not report response headers")
+    if owned_get and (redirect_guard is not None or public_only):
+        raise ValueError("owned GET does not support redirect_guard or public_only")
+    try:
+        _check_http_scheme(url)
+    except ValueError as exc:
+        _raise(HTTPError(str(exc)))
+    if public_only:
+        from . import public_host
+
+        if not public_host.is_public_address_syntax(url):
+            _raise(HTTPError("Refused non-public URL"))
     headers = headers or {}
     headers.setdefault("User-Agent", USER_AGENT)
 
@@ -1032,6 +1289,8 @@ def request(
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     if redirect_guard is not None:
         setattr(req, _REDIRECT_GUARD_ATTR, redirect_guard)
+    if public_only:
+        setattr(req, _PUBLIC_ONLY_ATTR, True)
 
     def log_request(message: str) -> None:
         if not sensitive_url:
@@ -1090,15 +1349,29 @@ def request(
                     response_headers = ResponseHeaders(response.headers.items())
                     final = response.geturl() if hasattr(response, "geturl") else ""
                     response_headers.url = final if isinstance(final, str) else ""
-                return response.status, response.read().decode('utf-8'), None
+                return (
+                    response.status,
+                    _read_bounded(response, effective_max_bytes).decode('utf-8'),
+                    None,
+                )
         except urllib.error.HTTPError as error:
             # Error bodies can stall just like successful bodies. Read both
             # inside the same deadline-protected worker before classification.
             body = None
             try:
-                body = error.read().decode('utf-8')
-            except (OSError, UnicodeDecodeError):
+                raw_error = _read_bounded(error, MAX_ERROR_BODY_BYTES, truncate=True)
+                body = raw_error.decode(
+                    'utf-8',
+                    errors='replace' if len(raw_error) == MAX_ERROR_BODY_BYTES else 'strict',
+                )
+            except (OSError, UnicodeDecodeError, ValueError):
                 pass
+            finally:
+                if isinstance(getattr(error, "fp", None), http.client.HTTPResponse):
+                    try:
+                        error.close()
+                    except Exception:
+                        pass
             return error.code, body, error
 
     def open_and_read_before_deadline(
@@ -1107,11 +1380,16 @@ def request(
         """Stop waiting at the wall deadline, even during DNS or body reads."""
         if owned_get:
             try:
+                owned_kwargs: Dict[str, Any] = {}
+                if routed is not None:
+                    # Only a proxied call needs the charge header back.
+                    owned_kwargs["with_headers"] = True
+                if max_bytes is not None:
+                    owned_kwargs["max_bytes"] = max_bytes
                 owned = bounded_get.get(
                     req, timeout=request_timeout,
                     deadline_monotonic=deadline_monotonic, cancel=cancel,
-                    # Only a proxied call needs the charge header back.
-                    **({"with_headers": True} if routed is not None else {}),
+                    **owned_kwargs,
                 )
             except bounded_get.GetLaunchError:
                 usage.cancel(charge)
@@ -1120,6 +1398,8 @@ def request(
                 if not exc.started:
                     usage.cancel(charge)
                 raise deadline_error() from exc
+            except bounded_get.ResponseTooLarge as exc:
+                raise ResponseTooLarge(str(exc)) from exc
             if routed is not None:
                 status, body, error, owned_headers = owned
                 if error is None:
@@ -1127,7 +1407,12 @@ def request(
             else:
                 status, body, error = owned
             try:
-                decoded = body.decode("utf-8") if body is not None else None
+                if body is None:
+                    decoded = None
+                elif error is not None:
+                    decoded = body.decode("utf-8", errors="replace")
+                else:
+                    decoded = body.decode("utf-8")
             except UnicodeDecodeError:
                 if error is None:
                     raise
@@ -1218,12 +1503,15 @@ def request(
             if return_headers:
                 return value, response_headers
             return value
-        except DeadlineExceeded as exc:
+        except (DeadlineExceeded, ResponseTooLarge) as exc:
             raise_recorded(exc)
         except urllib.error.HTTPError as e:
             log_request(f"HTTP Error {e.code}: {e.reason}")
             if body:
-                snippet = _scrub_fixture_value(" ".join(body.split()), redactions=fixture_redactions)
+                snippet = _scrub_fixture_value(
+                    _URL_USERINFO_RE.sub(r"\1", " ".join(body.split())),
+                    redactions=fixture_redactions,
+                )
                 log_request(f"Error body: {snippet[:200]}")
             last_error = HTTPError(f"HTTP {e.code}: {e.reason}", e.code, body)
 
@@ -1276,6 +1564,10 @@ def request(
                 outcome_state=health.TIMEOUT if wrapped_timeout else health.UNREACHABLE,
             )
             last_error.no_host = _is_no_host(e)
+            from . import public_host
+
+            if isinstance(reason, public_host.NonPublicAddressError):
+                raise_recorded(last_error)
             if _is_dns_failure(e):
                 # DNS resolution failures are transient; expand the retry budget
                 # to MIN_DNS_RETRIES if the caller passed fewer, and use
@@ -1373,6 +1665,8 @@ def get_text(
     retry_dns: bool = True,
     landed: Optional[list] = None,
     redirect_guard: Optional[Callable[[str], bool]] = None,
+    public_only: bool = False,
+    max_bytes: Optional[int] = None,
 ) -> Optional[str]:
     """Fetch a URL and return decoded text, or None on any failure.
 
@@ -1393,6 +1687,7 @@ def get_text(
             appended to it on success, or ``url`` when that is not known.
         redirect_guard: When given, a redirect to an address it returns False
             for is refused before it is followed, and the call returns None.
+        max_bytes: Optional response byte cap passed through to ``request``.
 
     Returns:
         Decoded response body as text, or None on failure.
@@ -1414,6 +1709,10 @@ def get_text(
         bounds["return_headers"] = True
     if redirect_guard is not None:
         bounds["redirect_guard"] = redirect_guard
+    if public_only:
+        bounds["public_only"] = True
+    if max_bytes is not None:
+        bounds["max_bytes"] = max_bytes
     try:
         answer = request(
             "GET", url, headers=merged, timeout=timeout, retries=retries, raw=True,
