@@ -3,5 +3,20 @@
   "scenario_id": "182b45fb-bfe6-4680-b90e-d8780ae4eb70",
   "skill_id": "15b92411-82c6-4935-8171-5605f075abb2",
   "sort_order": 2,
-  "tools": {}
+  "tools": {
+    "antigravity": true,
+    "claude_code": true,
+    "cline": true,
+    "codebuddy": true,
+    "codex": true,
+    "cursor": true,
+    "deepseek_harness": true,
+    "gemini_cli": true,
+    "github_copilot": true,
+    "openclaw": true,
+    "qclaw": true,
+    "trae": true,
+    "warp": true,
+    "workbuddy": true
+  }
 }

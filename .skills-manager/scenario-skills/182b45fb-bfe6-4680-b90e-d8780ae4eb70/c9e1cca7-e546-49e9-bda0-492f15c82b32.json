@@ -4,8 +4,10 @@
   "skill_id": "c9e1cca7-e546-49e9-bda0-492f15c82b32",
   "sort_order": 10,
   "tools": {
+    "antigravity": true,
     "claude_code": true,
     "cline": true,
+    "codebuddy": true,
     "codex": true,
     "cursor": true,
     "deepseek_harness": true,
