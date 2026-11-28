@@ -11,6 +11,6 @@
     "type": "git",
     "ref": "https://github.com/fanguyun/ai-skills.git",
     "subpath": "learning-mentor",
-    "branch": "main"
+    "branch": null
   }
 }

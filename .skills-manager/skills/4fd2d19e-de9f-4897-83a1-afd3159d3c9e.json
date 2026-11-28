@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "4fd2d19e-de9f-4897-83a1-afd3159d3c9e",
+  "path": "your-skill-name",
+  "path_key": "your-skill-name",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "templates/skill-template",
+    "branch": null
+  }
+}

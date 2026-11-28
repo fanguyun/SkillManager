@@ -64,7 +64,20 @@ python skills/patent-reader/tools/vault/check_obsidian_env.py --set "库路径" 
 
 ### 第 1 步：取证与结构化
 
-**仅有公开号、无本地全文/PDF 时**（**禁止**每次现写下载脚本）：先跑固化入口，再 extract：
+**海外公开号**（US / EP / WO / JP / KR 等，不是 `CN…`）：只跑下面一条，一次请求写出 `claim_tree.json`、`raw_sections.jsonl`、`description_paragraphs.json`、`source_manifest.json`、`synthesis_bundle.json`，并下载官方 PDF 到 `source/`：
+
+```bash
+python skills/patent-reader/tools/extract/fetch_gp_fulltext.py \
+  --pub <海外公开号> -o outputs/patent_reader/${RUN}
+# stdout 含 PATENT_TYPE、DESC_PARAS、PDF；状态见 fetch_gp_status.json
+```
+
+- 不再跑 `fetch_patent_pdf.py`、`extract_patent_text.py`，也不跑国知局核验和 `fetch_design_views.py`。有 PDF 时附图仍按下文 `extract_patent_figures.py` 裁。
+- 权要树的父号取自详情页结构，第 1.55 步仍要校对。
+- 机翻文献（`translated_from` 非空，如 Japanese）：笔记用中文写，权要和说明书引文用英文译文，并注明「机翻自日文」；需要原文时取 `text_original`。
+- 退出码 4（`GP_FULLTEXT_ERROR: reason=blocked`）：Google Patents 限流，**本轮停止，不重试**，告诉用户稍后再试或提供 PDF / 全文。退出码 1：按 `reason` 说明（`not_found` 未收录、`unavailable` 连不上），请用户提供 PDF。
+
+**仅有中国公开号、无本地全文/PDF 时**（**禁止**每次现写下载脚本）：先跑固化入口，再 extract：
 
 ```bash
 python skills/patent-reader/tools/extract/fetch_patent_pdf.py \
@@ -82,9 +95,9 @@ python skills/patent-reader/tools/patent_type.py --pub <公开号>
 
 实用 / 外观 → 按 `type_hooks.md` 填 Schema（**有公开号即应自动触发**，勿等用户口头说类型）。
 
-失败时按报错处理，不要编造 PDF 直链：「未收录」（新公开专利尚未上 Google）或「连不上」（检查网络后重试一次）→ 请用户提供 PDF。全文只走 Google Patents，正常 3 秒内完成；不要改走国知局下全文。
+失败时按报错处理，不要编造 PDF 直链：「未收录」（新公开专利尚未上 Google）或「连不上」（检查网络后重试一次）→ 请用户提供 PDF。报「限流（HTTP 503 / 429）」时不重试，直接请用户提供 PDF 或稍后再试。全文只走 Google Patents，正常 3 秒内完成；不要改走国知局下全文。
 
-**对照表派工**：取证成功后只跑 `extract_patent_text.py`，校对权要树，写出 `claim_features.json`（含从权）和 `description_paragraphs.json`，把路径交回对照表。不写通俗笔记，不入库，不裁附图，不写技术功效。
+**对照表派工**：取证成功后只跑 `extract_patent_text.py`（海外公开号用 `fetch_gp_fulltext.py` 的产出，不再 extract），校对权要树，写出 `claim_features.json`（含从权）和 `description_paragraphs.json`，把路径交回对照表。不写通俗笔记，不入库，不裁附图，不写技术功效。海外件特征行 `text` 保留英文原句，`plain` 写中文。
 
 **外观设计（公开号 `CN…S`）**：Google 多无 PDF，`fetch_patent_pdf.py` 会报「有详情页但没有 PDF」。改用：
 
@@ -266,7 +279,18 @@ python skills/patent-reader/tools/analyze/validate_claim_features.py \
 
 ### 第 2 步：公开检索 → 充实 `public_clues.json`（Agent 主路径）
 
-对 `context_anchor.json` → `web_search_queries` 执行 **WebSearch**（或国知局脚本）得到候选后：
+对 `context_anchor.json` → `web_search_queries` 执行 **WebSearch**（中国专利可用国知局脚本）得到候选。
+
+**海外公开号**：线索包不生成检索词，只在 `search_plan.facts` 给出局别、申请人、名称、CPC、摘要和第一条独立权要（机翻件附原文）。由你推断后，把检索词写进 `search_plan.queries`（每条含 `query` / `group` / `region` / `lang` / `purpose`），`status` 改为 `done`，再执行：
+
+- **本国市场**（`group: market`）：按局别判断专利面向的市场与当地语言（如 JP → 日本 / 日文；EP → 欧洲，以英文为主；WO 没有单一市场，跟随申请人所在国）。检索词用当地语言的技术词；当地网站有国家域名时加 `site:`。
+- **申请人所在国**（`group: applicant_home`）：读申请人名称和说明书判断；与本国市场语言不同才补一组，判不准就不补。日韩文献里的片假名、韩文公司名常是外国公司音译，不能单凭文字判国别。
+- 检索词取本案技术词（英文或原文），不整句照抄权要；每组 1～2 条，申请人名加引号。
+- 不用国知局脚本；「同申请人其他专利」需要时提示用户走检索包海外检索，本步不发请求。
+- 每条线索把命中它的检索词的 `group` / `region` / `lang` 写成 `region_group` / `region` / `lang`（`lang` 写中文，如「日文」）；两组以外偶然搜到的其他地区页面写 `region_group: "other"`，筛选时只保留置信度「高」的。
+- 外文页面：`summary` 用中文写要点；`anchor_fits` 的 `fit` 可在中文后附一句原文短句。
+
+得到候选后：
 
 1. **先**跑校验+筛选（置信度高→低，**默认最多 3 条**）：
 

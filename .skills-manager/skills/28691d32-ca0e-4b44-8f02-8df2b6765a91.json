@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "28691d32-ca0e-4b44-8f02-8df2b6765a91",
+  "path": "andrej-karpathy-skill",
+  "path_key": "andrej-karpathy-skill",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "duolahypercho/andrej-karpathy-skills/andrej-karpathy-skill",
+    "subpath": "skills/andrej-karpathy-skill",
+    "branch": null
+  }
+}

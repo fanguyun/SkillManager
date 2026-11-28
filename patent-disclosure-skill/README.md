@@ -145,7 +145,7 @@
 <tr>
 <td nowrap><a href="skills/patent-reader/README.md"><code style="white-space:nowrap">patent-reader</code></a></td>
 <td nowrap>通俗解读</td>
-<td>专利全文读不下去：公开号或 PDF 丢进来，换成普通人能看懂的笔记和图谱；推进 Obsidian 后能串起多件专利关联</td>
+<td>专利全文读不下去：公开号（中国或海外）或 PDF 丢进来，换成普通人能看懂的笔记和图谱；推进 Obsidian 后能串起多件专利关联</td>
 <td>「读专利」</td>
 <td nowrap><a href="skills/patent-reader/README.md">详情</a></td>
 </tr>
@@ -173,8 +173,8 @@
 <tr>
 <td nowrap><a href="skills/patent-search/README.md"><code style="white-space:nowrap">patent-search</code></a></td>
 <td nowrap>著录检索</td>
-<td>人名、公司、分类号照查；更能扔一张产品图或一段权要，倒推出检索式去翻公布公告</td>
-<td>「著录检索」</td>
+<td>人名、公司、分类号照查；更能扔一张产品图或一段权要，倒推出检索式去翻公布公告；点名海外时查美欧日韩等海外专利</td>
+<td>「著录检索」· 「海外检索」</td>
 <td nowrap><a href="skills/patent-search/README.md">详情</a></td>
 </tr>
 <tr>

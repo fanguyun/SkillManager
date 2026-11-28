@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+cookies.txt
+yike/
+.yike-state.json

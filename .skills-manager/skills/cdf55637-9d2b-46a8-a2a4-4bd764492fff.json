@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "cdf55637-9d2b-46a8-a2a4-4bd764492fff",
+  "path": "yike-photo-export",
+  "path_key": "yike-photo-export",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "yike-photo-export",
+    "branch": null
+  }
+}

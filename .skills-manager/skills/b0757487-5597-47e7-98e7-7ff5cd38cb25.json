@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "b0757487-5597-47e7-98e7-7ff5cd38cb25",
+  "path": "life-reset-protocol",
+  "path_key": "life-reset-protocol",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/fanguyun/ai-skills.git",
+    "subpath": "life-reset-protocol",
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "5931990c-60e2-40d1-bf7b-45d08dbe35a2",
+  "path": "academic-research-suite",
+  "path_key": "academic-research-suite",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "imbad0202/academic-research-skills-codex/academic-research-suite",
+    "subpath": "skills/academic-research-suite",
+    "branch": null
+  }
+}

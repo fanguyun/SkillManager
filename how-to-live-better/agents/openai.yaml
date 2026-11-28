@@ -1,0 +1,7 @@
+interface:
+  display_name: "高性价比人生指南"
+  short_description: "照《高性价比人生指南》查条目，按成本和证据排序再答"
+  default_prompt: "使用 $how-to-live-better 从《高性价比人生指南》里查相关条目，按成本和证据等级排序回答，并注明出自第几节第几条。"
+
+policy:
+  allow_implicit_invocation: true
